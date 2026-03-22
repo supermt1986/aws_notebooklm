@@ -43,5 +43,5 @@ plugins:
 custom:
   pythonRequirements:
     dockerizePip: non-linux
-    zip: false
+    zip: true
     slim: true
