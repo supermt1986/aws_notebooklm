@@ -3,7 +3,7 @@ service: notebooklm-backend
 # 配置 AWS 提供商参数
 provider:
   name: aws
-  runtime: python3.11
+  runtime: python3.12
   region: ${env:AWS_REGION, 'ap-northeast-1'}
   stage: ${opt:stage, 'dev'}
   apiGateway:
