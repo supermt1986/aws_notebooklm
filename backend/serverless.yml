@@ -6,6 +6,7 @@ provider:
   runtime: python3.12
   region: ${env:AWS_REGION, 'ap-northeast-1'}
   stage: ${opt:stage, 'dev'}
+  timeout: 29
   apiGateway:
     binaryMediaTypes:
       - '*/*'
