@@ -6,6 +6,8 @@ interface Message {
   content: string;
 }
 
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
 function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -15,7 +17,7 @@ function App() {
 
   const fetchDocuments = async () => {
     try {
-      const res = await fetch('http://localhost:8000/api/documents');
+      const res = await fetch(`${API_BASE}/api/documents`);
       const data = await res.json();
       setDocuments(data.documents || []);
     } catch (e) {
@@ -35,8 +37,8 @@ function App() {
     setLoading(true);
 
     try {
-      // 本地开发用地址，后续在 Amplify 部署时通过环境变量替换为真实的 API Gateway HTTPS 链接
-      const response = await fetch('http://localhost:8000/api/chat', {
+      // 使用动态注入的基础 URL 以支持云端或本地后端
+      const response = await fetch(`${API_BASE}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: userMsg, session_id: 'test-session-1' })
@@ -59,7 +61,7 @@ function App() {
     setUploadStatus('正在上传至模拟S3...');
 
     try {
-      const response = await fetch('http://localhost:8000/api/upload', {
+      const response = await fetch(`${API_BASE}/api/upload`, {
         method: 'POST',
         body: formData,
       });
