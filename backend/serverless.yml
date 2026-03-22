@@ -1,0 +1,47 @@
+service: notebooklm-backend
+
+# 配置 AWS 提供商参数
+provider:
+  name: aws
+  runtime: python3.11
+  region: ${env:AWS_REGION, 'ap-northeast-1'}
+  stage: ${opt:stage, 'dev'}
+  apiGateway:
+    binaryMediaTypes:
+      - '*/*'
+  iam:
+    role:
+      statements:
+        - Effect: "Allow"
+          Action:
+            - "s3:*"
+            - "dynamodb:*"
+            - "bedrock:*"
+          Resource: "*"
+  environment:
+    # 通过从宿主机注入环境变量来支持双轨制
+    MODELSCOPE_API_KEY: ${env:MODELSCOPE_API_KEY}
+    AWS_S3_BUCKET_NAME: ${env:AWS_S3_BUCKET_NAME}
+    PINECONE_API_KEY: ${env:PINECONE_API_KEY}
+    PINECONE_INDEX: ${env:PINECONE_INDEX}
+    LLM_PROVIDER: ${env:LLM_PROVIDER, 'modelscope'}
+    EMBED_PROVIDER: ${env:EMBED_PROVIDER, 'modelscope'}
+    VECTOR_DB_PROVIDER: ${env:VECTOR_DB_PROVIDER, 'pinecone'}
+
+functions:
+  api:
+    # 指向 app.py 里的 handler (Mangum 包裹实例)
+    handler: app.handler
+    events:
+      - httpApi:
+          path: '/{proxy+}'
+          method: '*'
+
+plugins:
+  - serverless-python-requirements
+
+custom:
+  pythonRequirements:
+    dockerizePip: non-linux
+    zip: true
+    slim: true

@@ -1,0 +1,15 @@
+fastapi
+mangum
+uvicorn
+boto3
+pydantic
+langchain
+langchain-community
+langchain-aws
+langchain-openai
+pinecone
+langchain-pinecone
+python-dotenv
+pypdf
+tiktoken
+python-multipart

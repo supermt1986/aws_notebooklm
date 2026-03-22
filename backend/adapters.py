@@ -1,0 +1,73 @@
+import os
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_aws import ChatBedrock, BedrockEmbeddings
+# Pinecone 和 OpenSearch 将在这里根据配置进行导入
+
+def get_llm():
+    """
+    LLM 大模型适配器：通过 LLM_PROVIDER 环境变量一键切换
+    """
+    provider = os.getenv("LLM_PROVIDER", "modelscope")
+    print(f"[Adapter Info] LLM 正在使用: {provider} 轨道")
+    
+    if provider == "modelscope":
+        return ChatOpenAI(
+            api_key=os.getenv("MODELSCOPE_API_KEY", "your-modelscope-key"),
+            base_url="https://api-inference.modelscope.cn/v1/",
+            model="Qwen/Qwen3.5-122B-A10B"
+        )
+    elif provider == "bedrock":
+        # 如果使用纯粹 AWS 轨道，利用 IAM 角色默认的环境变量 (如在 Lambda 内) 获取凭证
+        return ChatBedrock(
+            model_id="anthropic.claude-3-haiku-20240307-v1:0", # 个人练习可使用更便宜的 Nova 微型模型
+            region_name=os.getenv("AWS_REGION", "us-east-1")
+        )
+    else:
+        raise ValueError(f"未知的 LLM 提供商: {provider}")
+
+def get_embeddings():
+    """
+    向量化模型适配器：通过 EMBED_PROVIDER 环境变量切换
+    """
+    provider = os.getenv("EMBED_PROVIDER", "modelscope")
+    print(f"[Adapter Info] Embeddings 正在使用: {provider} 轨道")
+    
+    if provider == "modelscope":
+        return OpenAIEmbeddings(
+            api_key=os.getenv("MODELSCOPE_API_KEY", "your-modelscope-key"),
+            base_url="https://api-inference.modelscope.cn/v1/",
+            model="Qwen/Qwen3-Embedding-8B"
+        )
+    elif provider == "bedrock":
+        return BedrockEmbeddings(
+            model_id="amazon.titan-embed-text-v1",
+            region_name=os.getenv("AWS_REGION", "us-east-1")
+        )
+    else:
+        raise ValueError(f"未知的 Embedding 提供商: {provider}")
+
+def get_vector_store():
+    """
+    向量数据库适配器抽象。
+    返回一个可用于检索的 Retriever / VectorStore。
+    """
+    provider = os.getenv("VECTOR_DB_PROVIDER", "pinecone")
+    print(f"[Adapter Info] VectorDB 正在使用: {provider} 轨道")
+    
+    if provider == "pinecone":
+        from langchain_pinecone import PineconeVectorStore
+        
+        pc_key = os.getenv("PINECONE_API_KEY")
+        if not pc_key:
+            raise ValueError("请在 .env 中配置 PINECONE_API_KEY 以便对接 Pinecone 向量库")
+            
+        index_name = os.getenv("PINECONE_INDEX", "notebooklm-clone")
+        # 使用最新官方 langchain_pinecone 库进行检索与存储
+        return PineconeVectorStore.from_existing_index(index_name=index_name, embedding=get_embeddings())
+    elif provider == "opensearch":
+        # 返回 AWS 原生的 OpenSearch Serverless Vector Store
+        from langchain_community.vectorstores import OpenSearchVectorSearch
+        # return OpenSearchVectorSearch(opensearch_url="...", embedding_function=get_embeddings())
+        return "OpenSearchStore(Placeholder)"
+    else:
+         raise ValueError(f"未知的 VectorDB 提供商: {provider}")
