@@ -204,7 +204,8 @@ async def chat_interaction(req: ChatRequest):
     # 动态获取当前选定的模型和向量库（双轨架构生效点）
     llm = get_llm()
     vector_store = get_vector_store()
-    retriever = vector_store.as_retriever(search_kwargs={"k": 4})
+    # 【检索调优】将 Top-K 从 4 猛增到 12，以大幅提升事实类问题和跨语言语义（如中文搜日文）的命中率
+    retriever = vector_store.as_retriever(search_kwargs={"k": 12})
     
     template = """你是一个专业的 AWS NotebookLM AI 帮手。请基于参考资料来回答问题。
     如果提供的参考资料中找不到确切答案，请严谨地回答“抱歉，在知识库资料中没有记录相关信息”，禁止自己发散编造内容。
