@@ -60,6 +60,36 @@ async def get_documents():
         print(f"Failed to list documents from S3: {e}")
         return {"documents": []}
 
+@app.delete("/api/documents/{filename}")
+async def delete_document(filename: str):
+    """
+    知识库销毁接口: 深跨越 S3 和 Pinecone 同步粉碎物理文件与逻辑向量碎片
+    """
+    s3_bucket = os.getenv("AWS_S3_BUCKET_NAME")
+    try:
+        # 1. 扫描并摧毁 AWS S3 持久层存档
+        if s3_bucket:
+            import boto3
+            s3_client = boto3.client('s3', region_name=os.getenv("AWS_REGION", "ap-northeast-1"))
+            response = s3_client.list_objects_v2(Bucket=s3_bucket, Prefix="uploads/")
+            if 'Contents' in response:
+                for obj in response['Contents']:
+                    if obj['Key'].endswith(f"_{filename}") or obj['Key'] == f"uploads/{filename}":
+                        s3_client.delete_object(Bucket=s3_bucket, Key=obj['Key'])
+                        print(f"[S3粉碎] 已彻底删除原文件: {obj['Key']}")
+
+        # 2. 调用 Pinecone DB metadata 过滤器销毁源切片神经元
+        vector_store = get_vector_store()
+        if hasattr(vector_store, "delete"):
+            vector_store.delete(filter={"source": f"/tmp/{filename}"})
+            print(f"[Pinecone粉碎] 已抹除文档关联神经元集 (Source: /tmp/{filename})")
+
+        return {"status": "success", "message": f"全链路粉碎完毕: {filename}"}
+    except Exception as e:
+        print(f"[删除失败异常] {e}")
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/upload")
 async def upload_document(file: UploadFile = File(...)):
     """

@@ -19,7 +19,11 @@ const resources = {
             "retrieving": "知识库检索中",
             "server_error": "连接服务器失败，请检查后端服务是否正在运行。",
             "fetch_doc_error": "获取文档列表失败",
-            "switch_lang": "日本語"
+            "switch_lang": "日本語",
+            "delete_confirm": "您确定要从云端 S3 和向量数据库彻底粉碎文件 \n[ {{doc}} ] \n吗？此操作不可逆！",
+            "deleting": "🗑️ 正在粉碎...",
+            "delete_success": "✅ 粉碎成功",
+            "delete_fail": "❌ 粉碎失败"
         }
     },
     ja: {
@@ -39,7 +43,11 @@ const resources = {
             "retrieving": "ナレッジベース検索中",
             "server_error": "サーバーへの接続に失敗しました。",
             "fetch_doc_error": "ドキュメントリストの取得に失敗しました",
-            "switch_lang": "中文"
+            "switch_lang": "中文",
+            "delete_confirm": "本当にクラウド (S3) とベクトルデータベースからファイル \n[ {{doc}} ] \nを完全に削除しますか？",
+            "deleting": "🗑️ 削除中...",
+            "delete_success": "✅ 削除成功",
+            "delete_fail": "❌ 削除失敗"
         }
     }
 };

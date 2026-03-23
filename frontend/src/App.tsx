@@ -76,6 +76,22 @@ function App() {
     }
   };
 
+  const handleDelete = async (filename: string) => {
+    if (!window.confirm(t('delete_confirm', { doc: filename }))) return;
+
+    setUploadStatus(t('deleting'));
+    try {
+      const response = await fetch(`${API_BASE}/api/documents/${encodeURIComponent(filename)}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) throw new Error("Delete API failed");
+      setUploadStatus(t('delete_success'));
+      fetchDocuments();
+    } catch (e) {
+      setUploadStatus(t('delete_fail'));
+    }
+  };
+
   return (
     <div className="app-wrapper">
       <div className="sidebar dark-theme glass-panel">
@@ -85,8 +101,17 @@ function App() {
         </div>
         <div className="doc-list">
           {documents.map((doc, idx) => (
-            <div key={idx} className="doc-item" title={doc}>
-              📄 {doc}
+            <div key={idx} className="doc-item" title={doc} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>📄 {doc}</span>
+              <button
+                onClick={() => handleDelete(doc)}
+                style={{ background: 'transparent', border: 'none', color: '#ff4d4f', cursor: 'pointer', padding: '0 5px', fontSize: '1.2rem', transition: 'transform 0.2s' }}
+                onMouseOver={(e) => e.currentTarget.style.transform = 'scale(1.2)'}
+                onMouseOut={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                title="Delete"
+              >
+                🗑️
+              </button>
             </div>
           ))}
           {documents.length === 0 && <div className="no-docs">{t('no_docs')}</div>}
