@@ -68,11 +68,15 @@ function App() {
         method: 'POST',
         body: formData,
       });
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.detail || `Server returned ${response.status}`);
+      }
       await response.json(); // Consume response to prevent unhandled promise, but don't assign to avoid TS6133
       setUploadStatus(`✅ ${t('upload_success')}`);
       fetchDocuments();
-    } catch (err) {
-      setUploadStatus(`❌ ${t('upload_fail')}`);
+    } catch (err: any) {
+      setUploadStatus(`❌ ${t('upload_fail')}: ${err.message}`);
     }
   };
 

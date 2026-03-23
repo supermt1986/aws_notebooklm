@@ -119,20 +119,20 @@ async def upload_document(file: UploadFile = File(...)):
         with open(temp_path, "wb") as buffer:
             buffer.write(content)
             
-        # 文件已存入 S3，前端将通过 /api/documents 动态列表接口获取
-
-        # 异步丢入后台去切块存入 Pinecone (Serverless 最佳实践一般是发消息到 SQS 队列触发另一个 Lambda 处理，这里为单机测试做简化)
-        asyncio.create_task(process_into_vectorstore(temp_path, file.filename))
+        # 必须使用 await 同步等待向量化完成！
+        # 绝对不能用 asyncio.create_task 后台执行，因为 HTTP Response 一旦返回，AWS Lambda 的执行上下文会立刻进入休眠冻结状态，后台任务会瞬间被物理“掐死”并丢失 /tmp 文件路径权限！
+        await process_into_vectorstore(temp_path, file.filename)
         
+        return {
+            "status": "success", 
+            "filename": file.filename, 
+            "content_type": content_type,
+            "message": f"[{doc_type}] {upload_msg} 且成功入库 Pinecone"
+        }
     except Exception as e:
-        upload_msg = f"S3存储或解析分发失败: {str(e)}"
-    
-    return {
-        "status": "success", 
-        "filename": file.filename, 
-        "content_type": content_type,
-        "message": f"[{doc_type}] {upload_msg}"
-    }
+        from fastapi import HTTPException
+        print(f"[全局上传崩溃] {str(e)}")
+        raise HTTPException(status_code=500, detail=f"文档处理崩溃: {str(e)}")
 
 async def process_into_vectorstore(file_path: str, filename: str):
     from langchain_community.document_loaders import PyPDFLoader, TextLoader
@@ -153,6 +153,7 @@ async def process_into_vectorstore(file_path: str, filename: str):
         print(f"[RAG引擎] {filename} 处理完毕！生成了 {len(splits)} 个语义块，已安全写入 Vector DB。")
     except Exception as e:
         print(f"[RAG引擎错误] 处理 {filename} 时崩溃: {e}")
+        raise ValueError(f"向量神经元切片抛出异常: {str(e)}")
 
 @app.post("/api/chat")
 async def chat_interaction(req: ChatRequest):
