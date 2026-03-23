@@ -16,7 +16,7 @@ def get_llm():
         return ChatOpenAI(
             api_key=os.getenv("MODELSCOPE_API_KEY", "your-modelscope-key"),
             base_url="https://api-inference.modelscope.cn/v1/",
-            model="qwen/Qwen2.5-7B-Instruct"
+            model="Qwen/Qwen3-VL-8B-Instruct"
         )
     elif provider == "bedrock":
         # 如果使用纯粹 AWS 轨道，利用 IAM 角色默认的环境变量 (如在 Lambda 内) 获取凭证
