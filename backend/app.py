@@ -12,6 +12,11 @@ from dotenv import load_dotenv
 
 from adapters import get_llm, get_embeddings, get_vector_store
 
+# 【核心修复】强制指定所有涉及到 Token 计算的底层 C 库在 AWS Lambda 无头环境下的缓存目录至 /tmp，
+# 防止默认去挂载只读或不存在的 /home 目录引发 [Errno 2] No such file or directory 的隐形血案
+os.environ["TIKTOKEN_CACHE_DIR"] = "/tmp/tiktoken_cache"
+os.environ["XDG_CACHE_HOME"] = "/tmp/xdg_cache"
+
 load_dotenv()
 
 app = FastAPI(title="AWS NotebookLM API")
@@ -158,6 +163,8 @@ async def process_into_vectorstore(file_path: str, filename: str):
         vector_store.add_documents(splits)
         print(f"[RAG引擎] {filename} 处理完毕！生成了 {len(splits)} 个语义块，已安全写入 Vector DB。")
     except Exception as e:
+        import traceback
+        traceback.print_exc()  # 打印完整堆栈到 CloudWatch 供核查死因
         print(f"[RAG引擎错误] 处理 {filename} 时崩溃: {e}")
         raise ValueError(f"向量神经元切片抛出异常: {str(e)}")
 
