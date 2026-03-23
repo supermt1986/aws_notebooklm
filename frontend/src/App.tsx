@@ -94,22 +94,28 @@ function App() {
       </div>
 
       <div className="app-container dark-theme">
-        <header className="glass-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-            <h1>{t('app_title')} <span>{t('app_subtitle')}</span></h1>
+        <header className="glass-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+          <h1>{t('app_title')} <span>{t('app_subtitle')}</span></h1>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
             <button
               onClick={() => i18n.changeLanguage(i18n.language === 'zh' ? 'ja' : 'zh')}
-              style={{ padding: '4px 10px', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}
+              style={{ padding: '10px 16px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', borderRadius: '8px', cursor: 'pointer', fontSize: '0.9rem', transition: 'all 0.2s', fontWeight: '500' }}
             >
               🌐 {t('switch_lang')}
             </button>
-          </div>
-          <div className="upload-section">
-            <label className="upload-btn">
-              {t('upload_btn')}
-              <input type="file" accept=".pdf,image/*,.txt,.md,.csv,.docx" hidden onChange={handleFileUpload} />
-            </label>
-            {uploadStatus && <span className="status-text">{uploadStatus}</span>}
+
+            <div className="upload-section" style={{ margin: 0, position: 'relative' }}>
+              <label className="upload-btn">
+                {t('upload_btn')}
+                <input type="file" accept=".pdf,image/*,.txt,.md,.csv,.docx" hidden onChange={handleFileUpload} />
+              </label>
+              {uploadStatus &&
+                <span className="status-text" style={{ position: 'absolute', top: '120%', right: '0', whiteSpace: 'nowrap' }}>
+                  {uploadStatus}
+                </span>
+              }
+            </div>
           </div>
         </header>
 
