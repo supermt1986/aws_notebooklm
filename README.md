@@ -1,0 +1,29 @@
+# AWS NotebookLM Clone (云原生知识库引擎)
+
+本项目是一个基于 AWS Serverless 生态与开源大模型打造的轻量级、低成本个人知识库问答工具 (RAG System)。支持多模态文档上传、基于高维向量的相似度检索，并结合千亿参数大模型进行严谨的对话推理。
+
+## 🌟 核心特性
+- **纯血无状态云架构**：采用 AWS HTTP API Gateway + Lambda + S3 组合，按次触发计费，彻底消除闲置成本。
+- **开箱即用的双轨抽象**：支持在 `ModelScope开源社区 API` 与 `Amazon Bedrock 原生 API` 之间无缝一键切换。
+- **毛玻璃 UI 设计**：提供了直观响应式的 React 前端，集成自动滚动的极速对话交互流。
+- **超强的成本控制**：在开发测试阶段依托跨国云厂白嫖额度，真实物理运行费用被完美压制在 $0/月。
+
+## 📁 目录结构概要
+- `frontend/`: AWS Amplify 托管的 React 前端项目核心源码。
+- `backend/`: 部署至 AWS Lambda 的轻量级 FastAPI Python 后端引擎雷达中枢。
+- `.github/workflows/`: 完全自动化、隔离密钥的端到端 GitHub Actions Serverless CI/CD 物理发布跑道。
+
+## ⚙️ 部署先决条件
+请在您的 GitHub 全局环境密钥库中按顺序注入以下系统级环境变量 Secret：
+- `AWS_ACCESS_KEY_ID` & `AWS_SECRET_ACCESS_KEY` & `AWS_REGION` (核心打底物理通行证)
+- `MODELSCOPE_API_KEY` (核心大模型底座密钥)
+- `PINECONE_API_KEY` & `PINECONE_INDEX` (需手动去 Pinecone 面板创建 Dimension 限定为 4096 维的向量云数据库)
+
+## 🛠️ 本地开发环境调试
+```bash
+# 启动前端页面
+cd frontend && npm install && npm run dev
+
+# 启动后端 API 服务
+cd backend && pip install -r requirements.txt && python app.py
+```

@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import './App.css';
+import './i18n';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -9,6 +11,7 @@ interface Message {
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 function App() {
+  const { t, i18n } = useTranslation();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -21,7 +24,7 @@ function App() {
       const data = await res.json();
       setDocuments(data.documents || []);
     } catch (e) {
-      console.error('获取文档列表失败', e);
+      console.error(t('fetch_doc_error'), e);
     }
   };
 
@@ -46,7 +49,7 @@ function App() {
       const data = await response.json();
       setMessages(prev => [...prev, { role: 'assistant', content: data.reply }]);
     } catch (e) {
-      setMessages(prev => [...prev, { role: 'assistant', content: '连接服务器失败，请检查后端服务是否正在运行。' }]);
+      setMessages(prev => [...prev, { role: 'assistant', content: t('server_error') }]);
     } finally {
       setLoading(false);
     }
@@ -58,7 +61,7 @@ function App() {
 
     const formData = new FormData();
     formData.append('file', file);
-    setUploadStatus('正在上传至模拟S3...');
+    setUploadStatus(`⏳ ${t('uploading')}`);
 
     try {
       const response = await fetch(`${API_BASE}/api/upload`, {
@@ -66,10 +69,10 @@ function App() {
         body: formData,
       });
       const data = await response.json();
-      setUploadStatus(`✅ ${data.message || '上传成功'}`);
+      setUploadStatus(`✅ ${t('upload_success')}`);
       fetchDocuments();
     } catch (err) {
-      setUploadStatus('❌ 上传失败');
+      setUploadStatus(`❌ ${t('upload_fail')}`);
     }
   };
 
@@ -77,8 +80,8 @@ function App() {
     <div className="app-wrapper">
       <div className="sidebar dark-theme glass-panel">
         <div className="sidebar-header">
-          <h2>知识库文件</h2>
-          <span className="doc-count">{documents.length} 份</span>
+          <h2>{t('knowledge_base_files')}</h2>
+          <span className="doc-count">{t('files_count', { count: documents.length })}</span>
         </div>
         <div className="doc-list">
           {documents.map((doc, idx) => (
@@ -86,16 +89,24 @@ function App() {
               📄 {doc}
             </div>
           ))}
-          {documents.length === 0 && <div className="no-docs">暂无文档</div>}
+          {documents.length === 0 && <div className="no-docs">{t('no_docs')}</div>}
         </div>
       </div>
 
       <div className="app-container dark-theme">
         <header className="glass-header">
-          <h1>AWS NotebookLM <span>(Cloud Variant)</span></h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+            <h1>{t('app_title')} <span>{t('app_subtitle')}</span></h1>
+            <button
+              onClick={() => i18n.changeLanguage(i18n.language === 'zh' ? 'ja' : 'zh')}
+              style={{ padding: '4px 10px', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}
+            >
+              🌐 {t('switch_lang')}
+            </button>
+          </div>
           <div className="upload-section">
             <label className="upload-btn">
-              准备知识库资源 (多模态)
+              {t('upload_btn')}
               <input type="file" accept=".pdf,image/*,.txt,.md,.csv,.docx" hidden onChange={handleFileUpload} />
             </label>
             {uploadStatus && <span className="status-text">{uploadStatus}</span>}
@@ -107,8 +118,8 @@ function App() {
             {messages.length === 0 && (
               <div className="empty-state">
                 <div className="hero-icon">☁️</div>
-                <h3>欢迎使用全栈云原生知识库</h3>
-                <p>采用 React + Serverless + 架构无关适配层。您可以尝试上传文档并交流！</p>
+                <h3>{t('welcome_title')}</h3>
+                <p>{t('welcome_desc')}</p>
               </div>
             )}
             {messages.map((msg, idx) => (
@@ -117,7 +128,7 @@ function App() {
               </div>
             ))}
             {loading && <div className="message-bubble assistant loading">
-              <span className="dot">.</span><span className="dot">.</span><span className="dot">.</span> 知识库检索中
+              <span className="dot">.</span><span className="dot">.</span><span className="dot">.</span> {t('retrieving')}
             </div>}
           </div>
 
@@ -127,7 +138,7 @@ function App() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-              placeholder="问关于上传文档的任何问题..."
+              placeholder={t('search_placeholder')}
             />
             <button onClick={handleSend} disabled={loading}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
