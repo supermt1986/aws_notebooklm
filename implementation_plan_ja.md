@@ -138,3 +138,44 @@ aws_notebooklm/
 ├── implementation_plan.md        # 核心実装計画と作業実績報告 (中)
 └── implementation_plan_ja.md     # 核心実装計画と作業実績報告 (日)
 ```
+
+---
+
+## 7. アップグレードと改善の TODO リスト (次世代アーキテクチャの進化)
+
+システムの複雑さが増すにつれ、現在の極端にシンプルな Serverless アーキテクチャは、将来的にエンタープライズレベルでの進化が必要になります。以下は、コア機能とインフラストラクチャに関する改善 TODO リストです：
+
+### 7.1 自動化テスト防御線の導入 (Automated Testing CI/CD)
+現在の手動検証と TypeScript の静的型チェックに代わり、CI/CD パイプラインに厳格な自動テストのハードルを追加します。
+- **バックエンド (Pytest)**: GitHub Actions の `Serverless deploy` アクションの前に `pytest` を強制実行します。モックオブジェクトを使用して、S3 アップロード、Pinecone 書き込み、LLM のレスポンスフォーマットの単体テストを徹底します。
+- **フロントエンド (Vitest)**: AWS Amplify のビルド構成の `npm run build` フェーズの前にコンポーネントテストを追加し、多言語 UI や HTTP 500 クライアントエラーのトースト表示の安定性を保証します。
+
+### 7.2 ハイブリッド・アーキテクチャの導入 (Hybrid Architecture)
+AWS API Gateway の 29 秒という過酷なタイムアウト上限を突破しつつ、「リアルタイムチャット」と「重い長文レポート生成」の両方を完全にサポートするため、ルーティングを 2 系統のハイブリッドに再設計します。
+
+```mermaid
+graph TD
+    Client["フロントエンド ブラウザ (React / Vite)"]
+    
+    subgraph 方案1：ストリーミング・リアルタイム直結 (シナリオ：RAG Q&A)
+        Client -- "1. HTTP Streaming (タイプライター効果)" --> LambdaURL["Lambda Function URL (15分の超長寿命)"]
+        LambdaURL -- "2. トークン単位で即座に返却" --> Client
+        LambdaURL --> LLM_Fast["ストリーム対応 LLM (7B/8B)"]
+    end
+    
+    subgraph 方案2：非同期キューポーリング (シナリオ：長文レポートの生成)
+        Client -- "A. レポート生成ジョブを投入" --> APIGW["API Gateway (29秒タイムアウト)"]
+        APIGW -- "B. システムが瞬時に Task_ID を返す" --> Client
+        APIGW --> Lambda_API["FastAPI 受信サーバー"]
+        Lambda_API -- "C. 重いジョブをキューに投げる" --> SQS["AWS SQS メッセージキュー (非同期バッファ)"]
+        SQS -- "D. バックグラウンドで順次消費" --> Lambda_Worker["裏方 Lambda ワーカー"]
+        Lambda_Worker --> LLM_Heavy["超巨大パラメータモデル (122B)"]
+        Lambda_Worker -- "E. 生成完了後、結果を保存" --> DynamoDB[("Amazon DynamoDB (結果テーブル)")]
+        Client -. "F. Task_ID を用いてポーリング" .-> APIGW
+        APIGW -. "G. DynamoDB から状況・結果を照会" .-> DynamoDB
+    end
+```
+
+**アーキテクチャ進化によるメリット**:
+1. **究極の UX**: 方案1 では、Function URL を活用して API Gateway を回避し、ChatGPT のような文字単位でのリアルタイムストリーミング出力 (SSE) を RAG システムに提供します。
+2. **堅牢性とスケーラビリティ**: 方案2 では、時間がかかるタスクを SQS によってトラフィックシェーピングし、API Gateway のタイムアウトエラーに悩まされることなく、フロントエンドに進行状況バーを表示できるようになります。

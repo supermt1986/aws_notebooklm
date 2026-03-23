@@ -281,3 +281,44 @@ aws_notebooklm/
 - **原理级流转**：我们利用项目最底层的 `.github/workflows/backend-deploy.yml` YAML 文件，强行下发军令状，征用了一台由 GitHub 出资挂载着底层 Ubuntu 系统与 Python 3.12 豪华配置的虚拟战争机器。
 - **触发扳机**：仅当检测到 `git push` 的波及面覆盖到了 `backend/` 核心后膛时才会开启。
 - **指令组装执行**：虚拟死士开机后，会立刻接驳从环境变量读出的 `AWS_ACCESS_KEY` 最高秘密令牌，并直接唤醒地表最强容器部署中间件 **`Serverless Framework`**。该魔法组件会利用 `serverless.yml`，将我们轻薄的 `app.py` 混同着那些超大规模的大模型库压入邮票大小的代码胶囊内，最后手握上帝权限直降亚马逊服务器内部执行高阶网关的创建和 Lambda 簇群的高密挂载覆盖。
+
+---
+
+## 6. 升级改善 TODO List (进阶架构演进)
+
+随着系统复杂度的提升，当前的极简 Serverless 架构在未来的企业级应用中需要进行下一代演进。以下是核心的升级改善待办清单：
+
+### 6.1 补充自动化测试防线 (Automated Testing CI/CD)
+为了替代目前仅依靠 TypeScript 静态检查和人工验证的方式，我们将在 CI/CD 流水线中补充真正的自动化拦截网：
+- **后端 (Pytest)**：在 GitHub Actions 流水线的 `Serverless deploy` 动作之前，强制阻断并运行 `pytest`。利用 Mock 数据模拟针对 S3 上传、Pinecone 写入、LLM 拒答等边界情况的完整逻辑闭环测试。
+- **前端 (Vitest)**：在 AWS Amplify 的 `npm run build` 命令前嵌入院组件级状态测试，保障中日双语切换及异常错误气泡 (HTTP 500) 能够被准确渲染。
+
+### 6.2 引入黄金混合架构 (Hybrid Architecture)
+为了一劳永逸突破 AWS API Gateway 物理写死的 29 秒硬性超时上限，并同时兼顾“实时聊天”与“重型报告生成”，我们将重构当前的单轨 API：
+
+```mermaid
+graph TD
+    Client["前端浏览器 (React / Vite)"]
+    
+    subgraph 方案1：长连接实时打字机 (场景：日常 RAG 问答)
+        Client -- "1. HTTP Streaming (打字机效果)" --> LambdaURL["Lambda Function URL (专享 15 分钟存活期)"]
+        LambdaURL -- "2. 逐字渲染返回" --> Client
+        LambdaURL --> LLM_Fast["流式响应大模型 (7B/8B)"]
+    end
+    
+    subgraph 方案2：发号牌与异步轮询 (场景：超长文深度总结报告)
+        Client -- "A. 提交万字报告任务" --> APIGW["API Gateway (29s 超时上限)"]
+        APIGW -- "B. 瞬间返回 TaskID" --> Client
+        APIGW --> Lambda_API["前端网关接收器 (Lambda)"]
+        Lambda_API -- "C. 将深思任务丢入队列" --> SQS["AWS SQS 消息队列 (流量削峰)"]
+        SQS -- "D. 后台静默捞取任务" --> Lambda_Worker["后台苦力 Lambda (15 分钟超时)"]
+        Lambda_Worker --> LLM_Heavy["百亿/千亿巨型推理模型 (122B)"]
+        Lambda_Worker -- "E. 耗时数分钟写入结果" --> DynamoDB[("Amazon DynamoDB (结果暂存表)")]
+        Client -. "F. 前端拿着 TaskID 轮询" .-> APIGW
+        APIGW -. "G. 查询 DynamoDB 获取进度" .-> DynamoDB
+    end
+```
+
+**架构演进收益**：
+1. **极致体验**：方案1 保障了日常问答体验的即时感觉（完全隔离了 API Gateway，首 Token 延迟极低）。
+2. **绝对稳定**：方案2 把重度消耗时间的报告生成脏活进行了完美的物理隔离，后台进程甚至可以容忍大模型思考十分钟而不断联，前端仅需查寻数据库拿结果。
