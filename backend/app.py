@@ -34,11 +34,31 @@ def health_check():
     """用于 API Gateway / 负载均衡器的健康检查"""
     return {"status": "ok", "message": "NotebookLM backend is running."}
 
-UPLOADED_DOCUMENTS = []
-
 @app.get("/api/documents")
 async def get_documents():
-    return {"documents": UPLOADED_DOCUMENTS}
+    s3_bucket = os.getenv("AWS_S3_BUCKET_NAME")
+    if not s3_bucket:
+        return {"documents": []}
+        
+    try:
+        import boto3
+        s3_client = boto3.client('s3', region_name=os.getenv("AWS_REGION", "ap-northeast-1"))
+        response = s3_client.list_objects_v2(Bucket=s3_bucket, Prefix="uploads/")
+        
+        documents = []
+        if 'Contents' in response:
+            for obj in response['Contents']:
+                # 去除 uploads/ 前缀和 UUID
+                full_name = obj['Key'].replace("uploads/", "")
+                parts = full_name.split("_", 1)
+                display_name = parts[1] if len(parts) > 1 else full_name
+                if display_name not in documents:
+                    documents.append(display_name)
+                    
+        return {"documents": documents}
+    except Exception as e:
+        print(f"Failed to list documents from S3: {e}")
+        return {"documents": []}
 
 @app.post("/api/upload")
 async def upload_document(file: UploadFile = File(...)):
@@ -69,9 +89,7 @@ async def upload_document(file: UploadFile = File(...)):
         with open(temp_path, "wb") as buffer:
             buffer.write(content)
             
-        # 添加进内存显示列表
-        if file.filename not in UPLOADED_DOCUMENTS:
-            UPLOADED_DOCUMENTS.append(file.filename)
+        # 文件已存入 S3，前端将通过 /api/documents 动态列表接口获取
 
         # 异步丢入后台去切块存入 Pinecone (Serverless 最佳实践一般是发消息到 SQS 队列触发另一个 Lambda 处理，这里为单机测试做简化)
         asyncio.create_task(process_into_vectorstore(temp_path, file.filename))
