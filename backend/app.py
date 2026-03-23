@@ -156,8 +156,8 @@ async def process_into_vectorstore(file_path: str, filename: str):
         for doc in docs:
             doc.metadata["source"] = f"/tmp/{filename}"
             
-        # 【RAG 知识包裹优化】将切片放大到 3000 字，从而覆盖单页 PDF 上下文，防止“表格和规则”被粗暴割裂到不同区块
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=500)
+        # 【RAG 精度回归】回退切片大小至 1000，确保语义向量更聚焦在具体条款。
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         splits = text_splitter.split_documents(docs)
         
         # 【核心终局修复】彻底击碎 AWS Lambda 的多线程诅咒！
@@ -209,7 +209,7 @@ async def chat_interaction(req: ChatRequest):
     retriever = vector_store.as_retriever(search_kwargs={"k": 12})
     
     template = """你是一个专业的 AWS NotebookLM AI 帮手。请基于参考资料来回答问题。
-    如果提供的参考资料中找不到确切答案，请严谨地回答“抱歉，在知识库资料中没有记录相关信息”，禁止自己发散编造内容。
+    如果提供的参考资料中找不到确切答案，请使用用户提问的语言严谨地回答类似“抱歉，在知识库资料中没有记录相关信息”的内容，禁止自己发散编造内容。
     
     【核心交互规范】
     - 请根据用户提问时使用的语言进行回答（例如：用户用日语提问，您就必须用日语回答；用户用中文，您就用中文回答）。
