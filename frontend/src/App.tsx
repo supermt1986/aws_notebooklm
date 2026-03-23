@@ -68,7 +68,7 @@ function App() {
         method: 'POST',
         body: formData,
       });
-      const data = await response.json();
+      await response.json(); // Consume response to prevent unhandled promise, but don't assign to avoid TS6133
       setUploadStatus(`✅ ${t('upload_success')}`);
       fetchDocuments();
     } catch (err) {
