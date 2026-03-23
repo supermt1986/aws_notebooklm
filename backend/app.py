@@ -145,6 +145,12 @@ async def process_into_vectorstore(file_path: str, filename: str):
             loader = TextLoader(file_path, autodetect_encoding=True)
             
         docs = loader.load()
+        
+        # 【核心修复】因为物理文件用了 UUID，Loader 会默认把 metadata["source"] 写成 /tmp/abc...pdf。
+        # 我们必须在这把它强行还原回用户文件名的挂载路径，否则后续的 DELETE 按照 filename 进行过滤器清理时，将完全找不到这批幽灵切片！
+        for doc in docs:
+            doc.metadata["source"] = f"/tmp/{filename}"
+            
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
         splits = text_splitter.split_documents(docs)
         
