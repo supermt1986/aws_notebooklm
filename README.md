@@ -1,29 +1,33 @@
-# AWS NotebookLM Clone (云原生知识库引擎)
+# AWS NotebookLM Clone (クラウドネイティブ ナレッジベース エンジン)
 
-本项目是一个基于 AWS Serverless 生态与开源大模型打造的轻量级、低成本个人知识库问答工具 (RAG System)。支持多模态文档上传、基于高维向量的相似度检索，并结合千亿参数大模型进行严谨的对话推理。
+*[🇨🇳 中文版 (Chinese Version) はこちら](./README_zh.md)*
 
-## 🌟 核心特性
-- **纯血无状态云架构**：采用 AWS HTTP API Gateway + Lambda + S3 组合，按次触发计费，彻底消除闲置成本。
-- **开箱即用的双轨抽象**：支持在 `ModelScope开源社区 API` 与 `Amazon Bedrock 原生 API` 之间无缝一键切换。
-- **毛玻璃 UI 设计**：提供了直观响应式的 React 前端，集成自动滚动的极速对话交互流。
-- **超强的成本控制**：在开发测试阶段依托跨国云厂白嫖额度，真实物理运行费用被完美压制在 $0/月。
+本プロジェクトは、AWS Serverless エコシステムとオープンソースの LLM を活用した、軽量かつ低コストの個人用ナレッジベース Q&A ツール (RAG システム) です。マルチモーダルなドキュメントのアップロードに対応し、高次元ベクトルに基づく類似度検索および 1,000億パラメータクラスの LLM による厳密な対話推論を提供します。
 
-## 📁 目录结构概要
-- `frontend/`: AWS Amplify 托管的 React 前端项目核心源码。
-- `backend/`: 部署至 AWS Lambda 的轻量级 FastAPI Python 后端引擎雷达中枢。
-- `.github/workflows/`: 完全自动化、隔离密钥的端到端 GitHub Actions Serverless CI/CD 物理发布跑道。
+> 📖 **詳細なシステム構成図や「完全自動 CI/CD デプロイ」の仕組み、並びに解決済み課題の記録については、[💻 核心実装計画と作業実績報告 (Implementation Plan)](./implementation_plan.md) をご参照ください。**
 
-## ⚙️ 部署先决条件
-请在您的 GitHub 全局环境密钥库中按顺序注入以下系统级环境变量 Secret：
-- `AWS_ACCESS_KEY_ID` & `AWS_SECRET_ACCESS_KEY` & `AWS_REGION` (核心打底物理通行证)
-- `MODELSCOPE_API_KEY` (核心大模型底座密钥)
-- `PINECONE_API_KEY` & `PINECONE_INDEX` (需手动去 Pinecone 面板创建 Dimension 限定为 4096 维的向量云数据库)
+## 🌟 主な特徴
+- **ピュアステートレスなクラウドアーキテクチャ**: AWS HTTP API Gateway + Lambda + S3 の組み合わせにより、従量課金モデルを実現し、アイドル時のコストを完全に排除。
+- **プラグアンドプレイのデュアルトラック抽象化**: `ModelScope オープンソース API` と `Amazon Bedrock ネイティブ API` 間を環境変数でシームレスに切り替え可能。
+- **グラスモーフィズム UI**: 直感的でレスポンシブな React フロントエンド。自動スクロール対応の RAG 対話UIを搭載（日中多言語自動切替サポート）。
+- **圧倒的なコストパフォーマンス**: テスト段階では無料枠を最大限活用し、クラウドネイティブ環境での維持コストを $0/月 に抑制。
 
-## 🛠️ 本地开发环境调试
+## 📁 ディレクトリ構造
+- `frontend/`: AWS Amplify でホストされる React フロントエンドのソースコード。
+- `backend/`: AWS Lambda にデプロイされる FastAPI ベースの Python バックエンドアプリケーション。
+- `.github/workflows/`: シークレットを安全に管理し、完全に自動化された GitHub Actions バックエンド CI/CD パイプライン。
+
+## ⚙️ デプロイの前提条件
+GitHub リポジトリに以下の環境変数 Secrets を設定してから Actions 自動ビルドをトリガーしてください：
+- `AWS_ACCESS_KEY_ID` & `AWS_SECRET_ACCESS_KEY` & `AWS_REGION`
+- `MODELSCOPE_API_KEY` (LLM および Embedding API 用)
+- `PINECONE_API_KEY` & `PINECONE_INDEX` (事前に Pinecone で次元数 4096 のインデックスを作成する必要があります)
+
+## 🛠️ ローカル開発
 ```bash
-# 启动前端页面
+# フロントエンドの起動
 cd frontend && npm install && npm run dev
 
-# 启动后端 API 服务
+# バックエンドの起動 (仮想環境内)
 cd backend && pip install -r requirements.txt && python app.py
 ```
