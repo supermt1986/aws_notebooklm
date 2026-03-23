@@ -159,9 +159,33 @@ async def process_into_vectorstore(file_path: str, filename: str):
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
         splits = text_splitter.split_documents(docs)
         
-        vector_store = get_vector_store()
-        vector_store.add_documents(splits)
-        print(f"[RAG引擎] {filename} 处理完毕！生成了 {len(splits)} 个语义块，已安全写入 Vector DB。")
+        # 【核心终局修复】彻底击碎 AWS Lambda 的多线程诅咒！
+        # Langchain 的 Pinecone 适配器默认强制并发，而 Pinecone Client 在初始化 ThreadPool 时需要挂载 Linux 的 /dev/shm 内存区块。
+        # AWS Lambda 的极简安全容器物理阉割了 /dev/shm，导致底层的 C 语言 SemLock(信号量锁)一创建就爆出无名 FileNotFoundError！
+        # 解决方案：完全手写单线程、全同步的 HTTP Upsert 发送器，物理越过多线程池！
+        provider = os.getenv("VECTOR_DB_PROVIDER", "pinecone")
+        if provider == "pinecone":
+            from pinecone import Pinecone
+            import uuid
+            pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+            index = pc.Index(os.getenv("PINECONE_INDEX", "notebooklm-clone"))
+            embeddings = get_embeddings()
+            
+            batch_size = 32
+            for i in range(0, len(splits), batch_size):
+                batch = splits[i:i+batch_size]
+                texts = [doc.page_content for doc in batch]
+                metas = [doc.metadata.copy() for doc in batch]
+                for m, t in zip(metas, texts):
+                    m["text"] = t
+                ids = [str(uuid.uuid4()) for _ in batch]
+                vecs = embeddings.embed_documents(texts)
+                index.upsert(vectors=list(zip(ids, vecs, metas)))
+        else:
+            vector_store = get_vector_store()
+            vector_store.add_documents(splits)
+            
+        print(f"[RAG引擎] {filename} 处理完毕！纯同步模式已安全注入了 {len(splits)} 个语义切片到 Vector 边界。")
     except Exception as e:
         import traceback
         traceback.print_exc()  # 打印完整堆栈到 CloudWatch 供核查死因
