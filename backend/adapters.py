@@ -11,10 +11,12 @@ def get_llm():
     print(f"[Adapter Info] LLM 正在使用: {provider} 轨道")
     
     if provider == "modelscope":
+        # 【修复超时死区】之前的 122B 参数量过于庞大，稍微生成多一点字就会突破 API Gateway 29秒的物理斩杀线导致前端报 500！
+        # 由于 API Gateway 的 29s timeout 是物理不可篡改的，这里必须降级为超高扇出的 7B 轻量级纯指令调优模型保证每次返回毫秒级！
         return ChatOpenAI(
             api_key=os.getenv("MODELSCOPE_API_KEY", "your-modelscope-key"),
             base_url="https://api-inference.modelscope.cn/v1/",
-            model="Qwen/Qwen3.5-122B-A10B"
+            model="qwen/Qwen2.5-7B-Instruct"
         )
     elif provider == "bedrock":
         # 如果使用纯粹 AWS 轨道，利用 IAM 角色默认的环境变量 (如在 Lambda 内) 获取凭证
