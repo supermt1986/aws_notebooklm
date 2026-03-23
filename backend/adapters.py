@@ -38,7 +38,7 @@ def get_embeddings():
         return OpenAIEmbeddings(
             api_key=os.getenv("MODELSCOPE_API_KEY", "your-modelscope-key"),
             base_url="https://api-inference.modelscope.cn/v1/",
-            model="Qwen/Qwen3-Embedding-8B"
+            model="Qwen/Qwen3-Embedding-0.6B" # 由用户建议的专职 1024维 对比学习召回模型
         )
     elif provider == "bedrock":
         return BedrockEmbeddings(
