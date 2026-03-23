@@ -300,13 +300,13 @@ aws_notebooklm/
 graph TD
     Client["前端浏览器 (React / Vite)"]
     
-    subgraph 方案1：长连接实时打字机 (场景：日常 RAG 问答)
+    subgraph Scheme1 ["方案1：长连接实时打字机 (场景：日常 RAG 问答)"]
         Client -- "1. HTTP Streaming (打字机效果)" --> LambdaURL["Lambda Function URL (专享 15 分钟存活期)"]
         LambdaURL -- "2. 逐字渲染返回" --> Client
         LambdaURL --> LLM_Fast["流式响应大模型 (7B/8B)"]
     end
     
-    subgraph 方案2：发号牌与异步轮询 (场景：超长文深度总结报告)
+    subgraph Scheme2 ["方案2：发号牌与异步轮询 (场景：超长文深度总结报告)"]
         Client -- "A. 提交万字报告任务" --> APIGW["API Gateway (29s 超时上限)"]
         APIGW -- "B. 瞬间返回 TaskID" --> Client
         APIGW --> Lambda_API["前端网关接收器 (Lambda)"]

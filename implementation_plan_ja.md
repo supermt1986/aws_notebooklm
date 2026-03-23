@@ -157,13 +157,13 @@ AWS API Gateway の 29 秒という過酷なタイムアウト上限を突破し
 graph TD
     Client["フロントエンド ブラウザ (React / Vite)"]
     
-    subgraph 方案1：ストリーミング・リアルタイム直結 (シナリオ：RAG Q&A)
+    subgraph Scheme1 ["方案1：ストリーミング・リアルタイム直結 (シナリオ：RAG Q&A)"]
         Client -- "1. HTTP Streaming (タイプライター効果)" --> LambdaURL["Lambda Function URL (15分の超長寿命)"]
         LambdaURL -- "2. トークン単位で即座に返却" --> Client
         LambdaURL --> LLM_Fast["ストリーム対応 LLM (7B/8B)"]
     end
     
-    subgraph 方案2：非同期キューポーリング (シナリオ：長文レポートの生成)
+    subgraph Scheme2 ["方案2：非同期キューポーリング (シナリオ：長文レポートの生成)"]
         Client -- "A. レポート生成ジョブを投入" --> APIGW["API Gateway (29秒タイムアウト)"]
         APIGW -- "B. システムが瞬時に Task_ID を返す" --> Client
         APIGW --> Lambda_API["FastAPI 受信サーバー"]
