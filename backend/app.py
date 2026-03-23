@@ -208,20 +208,23 @@ async def chat_interaction(req: ChatRequest):
     # 【检索调优】将 Top-K 从 4 猛增到 12，以大幅提升事实类问题和跨语言语义（如中文搜日文）的命中率
     retriever = vector_store.as_retriever(search_kwargs={"k": 12})
     
-    template = """你是一个专业的 AWS NotebookLM AI 帮手。请基于参考资料来回答问题。
-    如果提供的参考资料中找不到确切答案，请使用用户提问的语言严谨地回答类似“抱歉，在知识库资料中没有记录相关信息”的内容，禁止自己发散编造内容。
+    template = """You are a professional AWS NotebookLM AI Assistant.
+    Please answer the query based ONLY on the provided Context. 
+    If the answer is not in the context, strictly state that the information is not recorded (in the same language as the user's question).
     
-    【核心交互规范】
-    - 请根据用户提问时使用的语言进行回答（例如：用户用日语提问，您就必须用日语回答；用户用中文，您就用中文回答）。
-    - 即使参考资料是日语，而用户用中文提问，您也应该用中文对资料内容进行总结和回答。
-    
-    <参考资料>
+    <Context>
     {context}
-    </参考资料>
+    </Context>
     
-    问题：{question}
+    【CRITICAL RULE】
+    - ALWAYS reply in the SAME language as the user's question.
+    - User asks in Japanese (日本語) -> You MUST reply in Japanese (日本語).
+    - User asks in Chinese (中文) -> You MUST reply in Chinese (中文).
+    - If the context is in Japanese but the user asks in Chinese, summarize the content in Chinese.
     
-    您的回答："""
+    Question: {question}
+    
+    Your Response:"""
     prompt = ChatPromptTemplate.from_template(template)
     
     def format_docs(docs):
