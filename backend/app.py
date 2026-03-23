@@ -156,7 +156,8 @@ async def process_into_vectorstore(file_path: str, filename: str):
         for doc in docs:
             doc.metadata["source"] = f"/tmp/{filename}"
             
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
+        # 【RAG 知识包裹优化】将切片放大到 3000 字，从而覆盖单页 PDF 上下文，防止“表格和规则”被粗暴割裂到不同区块
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=500)
         splits = text_splitter.split_documents(docs)
         
         # 【核心终局修复】彻底击碎 AWS Lambda 的多线程诅咒！
