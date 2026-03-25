@@ -30,6 +30,7 @@ provider:
     VECTOR_DB_PROVIDER: ${env:VECTOR_DB_PROVIDER, 'pinecone'}
     RETRIEVER_MODE: ${env:RETRIEVER_MODE, 'MANUAL'}
     KNOWLEDGE_BASE_ID: ${env:KNOWLEDGE_BASE_ID, ''}
+    DATA_SOURCE_ID: ${env:DATA_SOURCE_ID, ''}
 
 functions:
   api:

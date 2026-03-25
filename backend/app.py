@@ -125,8 +125,24 @@ async def upload_document(file: UploadFile = File(...)):
             buffer.write(content)
             
         # 必须使用 await 同步等待向量化完成！
-        # 绝对不能用 asyncio.create_task 后台执行，因为 HTTP Response 一旦返回，AWS Lambda 的执行上下文会立刻进入休眠冻结状态，后台任务会瞬间被物理“掐死”并丢失 /tmp 文件路径权限！
         await process_into_vectorstore(temp_path, file.filename)
+        
+        # 【Bedrock KB 自动化挂钩】若处于托管模式，上传 S3 后动态触发 Ingestion Job 实现“上传即同步”
+        retriever_mode = os.getenv("RETRIEVER_MODE", "MANUAL")
+        if retriever_mode == "BEDROCK_KB":
+            kb_id = os.getenv("KNOWLEDGE_BASE_ID")
+            ds_id = os.getenv("DATA_SOURCE_ID")
+            if kb_id and ds_id:
+                try:
+                    # 注意：Ingestion Job 由 bedrock-agent 客户端管理
+                    agent_client = boto3.client('bedrock-agent', region_name=os.getenv("AWS_REGION", "us-east-1"))
+                    agent_client.start_ingestion_job(knowledgeBaseId=kb_id, dataSourceId=ds_id)
+                    print(f"[RAG同步器] 已成功触发 AWS KB 同步任务 (DS_ID: {ds_id})")
+                except Exception as e:
+                    print(f"[RAG同步器错误] 触发 IngestionJob 失败: {str(e)}")
+            else:
+                print("[RAG同步器提示] 缺少 KB_ID 或 DS_ID，请在 GitHub 中配置以启用自动同步")
+
         
         return {
             "status": "success", 
