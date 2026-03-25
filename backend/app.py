@@ -198,7 +198,7 @@ async def chat_interaction(req: ChatRequest):
     """
     RAG 对话核心接口：检索向量库 -> 构建知识上下文 -> 询问底座大模型
     """
-    from .adapters import get_llm, get_retriever
+    from adapters import get_llm, get_retriever
     from langchain_core.prompts import ChatPromptTemplate
     
     # 动态获取当前选定的模型和检索器（支持代码手动挡与 KB 托管挡切换）
