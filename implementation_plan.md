@@ -352,3 +352,23 @@ graph TD
 *   **上下文断层 (Multi-hop Failure)**：
     *   **现象**：PDF 中的“规则”在第一段，“表格”在第二段，小切片会导致两者被拆分，造成 AI 无法联合推理。
     *   **解决方案**：将 `chunk_size` 猛增至 **3000**，确保单页内的逻辑链条高度聚合在同一向量中。
+## 7. AWS Bedrock 全托管知识库 (Managed RAG) 实验路径
+
+基于用户提出的“既能练习托管服务，又能灵活控制成本”的需求，我们在架构中引入了“受控实验室模式”：
+
+### 7.1 核心架构 (S3 -> Bedrock KB -> Pinecone)
+*   **向量引擎**：Bedrock Knowledge Base (KB) 完美支持 Pinecone 作为后端数据库。
+*   **嵌入模型**：使用 **Titan Text Embeddings v2** (支持 1024 维输出，可与现有 Qwen 索引共享维度空间，但向量互不通用)。
+*   **自动同步**：无需 Lambda 手写切片代码，S3 一旦更新，触发 Ingestion Job 即可自动解析同步。
+
+### 7.2 费用防御逻辑 (避坑指南)
+*   **KB 管理费**：约 $0.19/小时。
+*   **策略**：
+    *   **按需开启**：仅在练习和联调期间创建 KB 资源。
+    *   **及时止损**：练习结束或休息前，**立即通过控制台或脚本删除 Knowledge Base 资源**。删除 KB 资源并不会删除 S3 的文件和 Pinecone 的数据，下次练习时只需几秒钟重新创建一个指向相同位置的 KB 即可。
+    *   **平行索引**：由于不同 Embedding 模型向量不通，强烈建议在 Pinecone 后台创建一个新 Namespace 或新 Index 进行隔离练习。
+
+### 7.3 双轨切换代码实现
+我们在 `adapters.py` 和 `app.py` 中引入 `RETRIEVER_MODE` 环境变量，实现“一键换芯”：
+- `MANUAL` (默认): 自定义 Lambda 切片器 + ModelScope 嵌入。
+- `BEDROCK_KB`: 调用 AWS SDK 的 `retrieve_and_generate` 接口。
