@@ -7,6 +7,7 @@
 目前系统采用 **事件驱动 (Event-Driven)** 的 Serverless 模式：
 
 ```mermaid
+graph TD
     subgraph 核心引擎
         Pinecone[("Pinecone 向量搜索")]
         ModelScope["ModelScope / Bedrock (模型端)"]
