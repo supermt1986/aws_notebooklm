@@ -3,6 +3,7 @@ try:
 except ImportError:
     pass
 
+# AWS NotebookLM Backend API - Triggering fresh deploy for SQS upgrade
 import os
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
