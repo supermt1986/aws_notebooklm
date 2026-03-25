@@ -183,6 +183,17 @@ graph TD
     Lambda -->|检索 I. 返回大白话输出| UI
 ```
 
+### 5. 核心架构：异步轮询 (Asynchronous Polling)
+为了解决 AWS API Gateway 29 秒超时限制，系统已全面升级为异步任务流架构：
+- **API 接收层**：FastAPI 负责接收上传、在 DynamoDB 记录任务并秒回响应。
+- **事件触发层**：S3 的 `ObjectCreated` 事件自动触发后台 Worker。
+- **后台处理层**：专用 Lambda 执行文档解析、向量化并更新任务状态。
+- **前端对账层**：React 通过轮询 `GET /api/tasks/{id}` 获取实时进度并刷新 UI。
+
+详细设计请参见：[🏗️ 异步 RAG 架构深度解析](./aws_asynchronous_rag_architecture.md)
+
+---
+
 ### 今日开发历程：遇坑与解决方案 🐛
 
 1. **FastAPI 表单上传崩溃 (`RuntimeError`)**
@@ -213,11 +224,11 @@ graph TD
    - **问题**：为跳过压缩包造成的找不到路径问题干脆取消自动压缩（`zip: false`），怎料挂载的 LangChain、Pinecone 机器学习巨型依赖库解压后彻底撑爆亚马逊规定的上限，触发底层物理切割造成上线环境四分五裂集体报出 500 断联！
    - **解决**：再次拥抱打包即压缩的真理（回归 `zip: true` 控制在小几十兆），同时在核心中枢 `app.py` 顶层级物理注入监听器：`import unzip_requirements`，使其可以在内存中高速自释放。
 10. **致命 C 语言底层库版本不兼容 (`GLIBC_2.28 not found`)**
-   - **问题**：AI 分词器核心库 `tiktoken` 包含 C 扩展，GitHub Ubuntu 构建机使用的底层 `GLIBC` 版本较新，而原定的 AWS Lambda `python3.11` 运行在古老的 Amazon Linux 2 (其 glibc 仅为 2.26) 上，执行时因找不到对应的底层动态链接库而当场报废。
-   - **解决**：釜底抽薪，在 `serverless.yml` 与自动化发布 YAML 中，将基础运行环境双双强行升级为 `python3.12`，以此强制要求 AWS Lambda 为我们开启使用现代版 Amazon Linux 2023 的系统容器（GLIBC 2.34），实现降维打击，瞬间解决全部二进制兼容报错。
+    - **问题**：AI 分词器核心库 `tiktoken` 包含 C 扩展，GitHub Ubuntu 构建机使用的底层 `GLIBC` 版本较新，而原定的 AWS Lambda `python3.11` 运行在古老的 Amazon Linux 2 (其 glibc 仅为 2.26) 上，执行时因找不到对应的底层动态链接库而当场报废。
+    - **解决**：釜底抽薪，在 `serverless.yml` 与自动化发布 YAML 中，将基础运行环境双双强行升级为 `python3.12`，以此强制要求 AWS Lambda 为我们开启使用现代版 Amazon Linux 2023 的系统容器（GLIBC 2.34），实现降维打击，瞬间解决全部二进制兼容报错。
 11. **默认运行时仅 6 秒遭遇无情截断 (`Status: timeout`)**
-   - **问题**：成功解析文档并进入 Embedding 向量化阶段时，由于网络请求网络和魔搭社区大模型接口需要一定耗时，直接触及了 AWS Lambda 万年不变的默认 6 秒执行上限，被强制物理熔断导致用户端显示 HTTP 500。
-   - **解决**：在 `serverless.yml` 的 `provider` 全局层级显式挂载了 `timeout: 29`，与云端 API Gateway 网关的最大容许发呆时间（29秒）精确对齐，赋予了 RAG 充足的计算时空。
+    - **问题**：成功解析文档并进入 Embedding 向量化阶段时，由于网络请求网络和魔搭社区大模型接口需要一定耗时，直接触及了 AWS Lambda 万年不变的默认 6 秒执行上限，被强制物理熔断导致用户端显示 HTTP 500。
+    - **解决**：在 `serverless.yml` 的 `provider` 全局层级显式挂载了 `timeout: 29`，与云端 API Gateway 网关的最大容许发呆时间（29秒）精确对齐，赋予了 RAG 充足的计算时空。
 
 ### 最新资源准备与配置指南 (环境依赖基建手册)
 
@@ -258,7 +269,7 @@ aws_notebooklm/
 
 ### 现阶段云端账单分析与防超支估算
 
-在跑完免流配置管道后，由于我们采取了**分离模型端至免费开源 SaaS**（魔搭与 Pinecone）的架构策略，本项目尽管完全置于 AWS 真实生产云端上，但所调用的**均属首年/永久合规 Free Tier（免费套餐）范畴**之列：
+在跑完免流配置管道后，由于我们采取了**分离模型端至免费开源 SaaS**（魔搭与 Pinecone）的架构策略，本项目尽管完全置于 AWS 真实生产云端上，但所调用的**均属首年/永久合規 Free Tier（免费套餐）范畴**之列：
 - **AWS Amplify (前端页托管 CDN)**：静态资源加载速度全球加速，每月首个 15GB 流量免费，普通开发者几近零感知。
 - **Amazon API Gateway v2**：每月首发前 100 万次 API 请求免费。开发测试期开销死锁 `$0`。
 - **AWS Lambda (Python 3.12计算层)**：AWS 默认赠送庞大的每月 40 万 GB-秒计算空间。即便我们在 Embedding 操作偶尔触及高发呆秒数上限（20多秒/次），极度充足的池子资源也能完美覆盖。
@@ -306,14 +317,14 @@ graph TD
         LambdaURL --> LLM_Fast["流式响应大模型 (7B/8B)"]
     end
     
-    subgraph Scheme2 ["方案2：发号牌与异步轮询 (场景：超长文深度总结报告)"]
-        Client -- "A. 提交万字报告任务" --> APIGW["API Gateway (29s 超时上限)"]
+    subgraph Scheme_Current ["当前架构：发号牌与异步轮询"]
+        Client -- "A. 提交上传任务" --> APIGW["API Gateway (立即响应)"]
         APIGW -- "B. 瞬间返回 TaskID" --> Client
-        APIGW --> Lambda_API["前端网关接收器 (Lambda)"]
-        Lambda_API -- "C. 将深思任务丢入队列" --> SQS["AWS SQS 消息队列 (流量削峰)"]
-        SQS -- "D. 后台静默捞取任务" --> Lambda_Worker["后台苦力 Lambda (15 分钟超时)"]
-        Lambda_Worker --> LLM_Heavy["百亿/千亿巨型推理模型 (122B)"]
-        Lambda_Worker -- "E. 耗时数分钟写入结果" --> DynamoDB[("Amazon DynamoDB (结果暂存表)")]
+        APIGW --> Lambda_API["任务接收器 (Lambda)"]
+        Lambda_API -- "C. 物理存放文件" --> S3["AWS S3 (存储桶)"]
+        S3 -- "D. 事件触发" --> Lambda_Worker["后台执行器 (Lambda)"]
+        Lambda_Worker --> LLM_Engine["RAG 引擎 (Shared)"]
+        Lambda_Worker -- "E. 更新处理进度" --> DynamoDB[("Amazon DynamoDB (任务状态表)")]
         Client -. "F. 前端拿着 TaskID 轮询" .-> APIGW
         APIGW -. "G. 查询 DynamoDB 获取进度" .-> DynamoDB
     end
@@ -352,39 +363,3 @@ graph TD
 *   **上下文断层 (Multi-hop Failure)**：
     *   **现象**：PDF 中的“规则”在第一段，“表格”在第二段，小切片会导致两者被拆分，造成 AI 无法联合推理。
     *   **解决方案**：将 `chunk_size` 猛增至 **3000**，确保单页内的逻辑链条高度聚合在同一向量中。
-## 7. AWS Bedrock 全托管知识库 (Managed RAG) 实验路径
-
-基于用户提出的“既能练习托管服务，又能灵活控制成本”的需求，我们在架构中引入了“受控实验室模式”：
-
-### 7.1 核心架构 (S3 -> Bedrock KB -> Pinecone)
-*   **向量引擎**：Bedrock Knowledge Base (KB) 完美支持 Pinecone 作为后端数据库。
-*   **嵌入模型**：使用 **Titan Text Embeddings v2** (支持 1024 维输出，可与现有 Qwen 索引共享维度空间，但向量互不通用)。
-*   **自动同步**：无需 Lambda 手写切片代码，S3 一旦更新，触发 Ingestion Job 即可自动解析同步。
-
-### 7.2 费用防御逻辑 (避坑指南)
-*   **KB 管理费**：约 $0.19/小时。
-*   **策略**：
-    *   **按需开启**：仅在练习和联调期间创建 KB 资源。
-    *   **及时止损**：练习结束或休息前，**立即通过控制台或脚本删除 Knowledge Base 资源**。删除 KB 资源并不会删除 S3 的文件和 Pinecone 的数据，下次练习时只需几秒钟重新创建一个指向相同位置的 KB 即可。
-    *   **平行索引**：由于不同 Embedding 模型向量不通，强烈建议在 Pinecone 后台创建一个新 Namespace 或新 Index 进行隔离练习。
-
-### 7.3 双轨切换代码实现
-我们在 `adapters.py` 和 `app.py` 中引入 `RETRIEVER_MODE` 环境变量，实现“一键换芯”：
-- `MANUAL` (默认): 自定义 Lambda 切片器 + ModelScope 嵌入。
-- `BEDROCK_KB`: 通过 `AmazonKnowledgeBasesRetriever` 调用 AWS 原生检索接口。
-
-## 8. 异步轮询架构 (方案 B: 最终生产演进)
-
-由于部分 AWS 环境对公网 Lambda Function URL 存在权限限制（403），我们正式引入基于 **SQS/S3 Trigger + DynamoDB** 的异步处理模型，彻底绕过 29 秒超时限制。
-
-### 8.1 异步处理流 (Flow)
-1.  **用户上传**：`POST /api/upload` 仅负责将文件流写入 S3。
-2.  **任务注册**：后端在 `TasksTable` 中注册一条 `status=PENDING` 的记录，并立即返回 `task_id`。
-3.  **后台触发**：S3 的 `ObjectCreated` 事件自动触发一个新的 **Worker Lambda**。
-4.  **耗时任务**：Worker Lambda 在后台执行切片、嵌入（ModelScope）或知识库同步。完成后更新 `TasksTable` 状态为 `COMPLETED`。
-5.  **前端对账**：前端 React 通过 `GET /api/tasks/{task_id}` 进行 3-5 秒一次的轮询。
-
-### 8.2 核心组件变更
-*   **DynamoDB**: 新增 `TasksTable` 用于追踪异步进度。
-*   **Lambda**: 新增 `s3_processor` 函数，配置 S3 事件源。
-*   **Frontend**: `App.tsx` 增加轮询 Hook。
