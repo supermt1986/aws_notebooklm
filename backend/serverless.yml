@@ -18,6 +18,7 @@ provider:
             - "s3:*"
             - "dynamodb:*"
             - "bedrock:*"
+            - "sqs:*"
           Resource: "*"
   environment:
     # 通过从宿主机注入环境变量来支持双轨制
