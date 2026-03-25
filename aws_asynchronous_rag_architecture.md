@@ -7,30 +7,13 @@
 目前系统采用 **事件驱动 (Event-Driven)** 的 Serverless 模式：
 
 ```mermaid
-graph TD
-    subgraph 前端与网关
-        Client["React 前端 (Amplify)"]
-        APIGW["API Gateway (HTTP API)"]
-    end
-
-    subgraph 同步处理逻辑
-        Lambda_API["API Lambda (FastAPI)"]
-        S3[("Amazon S3 (文档桶)")]
-        DB_Tasks[("DynamoDB (任务状态表)")]
-    end
-
-    subgraph 异步处理引擎
-        S3_Event["S3 ObjectCreated 事件"]
-        Lambda_Worker["Processor Lambda (后台工蜂)"]
-        RagEngine["RAG 引擎 (Shared)"]
-    end
-
-    subgraph 核心组件
+    subgraph 核心引擎
         Pinecone[("Pinecone 向量搜索")]
         ModelScope["ModelScope / Bedrock (模型端)"]
+        RagEngine["RAG 核心逻辑 (Shared)"]
     end
 
-    %% 连线关系
+    %% 1. 异步上传流水线 (Async Ingestion)
     Client -- "1. 上传文件 (POST /upload)" --> APIGW
     APIGW --> Lambda_API
     Lambda_API -- "2. 记录 PENDING 状态" --> DB_Tasks
@@ -45,9 +28,16 @@ graph TD
     RagEngine -- "7. 写入向量索引" --> Pinecone
     Lambda_Worker -- "8. 状态变更为 COMPLETED" --> DB_Tasks
 
-    Client -. "9. 定时轮询 (GET /tasks/{id})" .-> APIGW
+    Client -. "9. 定时轮询 (status)" .-> APIGW
     APIGW -.-> Lambda_API
-    Lambda_API -. "10. 返回实时进度" .-> DB_Tasks
+    Lambda_API -. "10. 获取进度" .-> DB_Tasks
+
+    %% 2. 同步对话流水线 (Sync QA)
+    Client ==>| "A. 自然语言提问 (POST /chat)" | APIGW
+    APIGW ==>| "B. 实时请求" | Lambda_API
+    Lambda_API ==>| "C. 检索 & 生成" | RagEngine
+    RagEngine ==>| "D. 答案摘要" | Lambda_API
+    Lambda_API ==>| "E. 即时回复" | Client
 ```
 
 ## 2. 详细时序图 (Sequence Diagram)
@@ -62,30 +52,31 @@ sequenceDiagram
     participant S as Amazon S3
     participant D as DynamoDB (Tasks)
     participant W as Worker Lambda
-    participant V as Vector DB (Pinecone)
+    participant R as RAG Engine
 
+    Note over U, R: --- 场景 A：异步文档建库 (Async Ingestion) ---
     U->>A: POST /api/upload (Multipart File)
-    Note over A: 生成 task_id (UUID)
     A->>D: 挂号: {task_id, status: 'PENDING'}
-    A->>S: 上传文件至 uploads/{task_id}_{name}
-    A-->>U: 立即返回 {task_id, status: 'success'}
+    A->>S: 上传文件
+    A-->>U: 立即返回 {task_id} (秒回)
     
-    par 后台处理过程 (Async)
-        S->>W: 触发 S3:ObjectCreated 事件
-        W->>D: 更新状态: status: 'PROCESSING'
-        W->>S: 下载原始文件到 /tmp
-        W->>W: 执行 RAG 解析与向量化转换
-        W->>V: 批量 Upsert 向量索引
-        W->>D: 更新状态: status: 'COMPLETED'
-    and 前端轮询过程 (Polling)
-        loop 每 3 秒一次
-            U->>A: GET /api/tasks/{task_id}
-            A->>D: 查询任务详情
-            D-->>A: 返回当前状态 (PENDING/PROCESSING/...)
-            A-->>U: 渲染进度条或状态文本
-            Note right of U: 若状态为 COMPLETED 则停止轮询并刷新
-        end
+    S->>W: 触发 S3:ObjectCreated 事件
+    W->>D: 更新状态: status: 'PROCESSING'
+    W->>R: 执行解析 & 写入向量库
+    W->>D: 更新状态: status: 'COMPLETED'
+    
+    loop 前端轮询
+        U->>A: GET /api/tasks/{task_id}
+        A->>D: 查询进度
+        A-->>U: 返回当前进度
     end
+
+    Note over U, R: --- 场景 B：同步对话问答 (Sync Q&A) ---
+    U->>A: POST /api/chat (用户提问)
+    A->>R: 调用同步 RAG 检索链
+    R->>R: 向量库搜寻 -> 模型回复
+    R-->>A: 返回生成的答案内容
+    A-->>U: 返回 {reply: "..."} (约 5-15s)
 ```
 
 ## 3. 为什么 QA 仍然是同步的？
