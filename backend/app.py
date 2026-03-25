@@ -125,6 +125,7 @@ async def upload_document(file: UploadFile = File(...)):
             buffer.write(content)
             
         # 必须使用 await 同步等待向量化完成！
+        # 注意：在托管模式下，AWS 会自动通过下面的 Ingestion Job 接手后续的大规模索引
         await process_into_vectorstore(temp_path, file.filename)
         
         # 【Bedrock KB 自动化挂钩】若处于托管模式，上传 S3 后动态触发 Ingestion Job 实现“上传即同步”
