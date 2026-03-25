@@ -124,25 +124,28 @@ async def upload_document(file: UploadFile = File(...)):
         with open(temp_path, "wb") as buffer:
             buffer.write(content)
             
-        # 必须使用 await 同步等待向量化完成！
-        # 注意：在托管模式下，AWS 会自动通过下面的 Ingestion Job 接手后续的大规模索引
-        await process_into_vectorstore(temp_path, file.filename)
-        
-        # 【Bedrock KB 自动化挂钩】若处于托管模式，上传 S3 后动态触发 Ingestion Job 实现“上传即同步”
+        # 【RAG 路径分流】根据当前模式选择最快的索引方式
         retriever_mode = os.getenv("RETRIEVER_MODE", "MANUAL")
+        
         if retriever_mode == "BEDROCK_KB":
+            # 自动化托管模式：只管上传 S3 并触发 AWS 官方同步，极致提速
             kb_id = os.getenv("KNOWLEDGE_BASE_ID")
             ds_id = os.getenv("DATA_SOURCE_ID")
             if kb_id and ds_id:
                 try:
-                    # 注意：Ingestion Job 由 bedrock-agent 客户端管理
-                    agent_client = boto3.client('bedrock-agent', region_name=os.getenv("AWS_REGION", "us-east-1"))
+                    agent_client = boto3.client('bedrock-agent', region_name=os.getenv("AWS_REGION", "ap-northeast-1"))
                     agent_client.start_ingestion_job(knowledgeBaseId=kb_id, dataSourceId=ds_id)
                     print(f"[RAG同步器] 已成功触发 AWS KB 同步任务 (DS_ID: {ds_id})")
+                    upload_msg += "（自动同步任务已下达）"
                 except Exception as e:
                     print(f"[RAG同步器错误] 触发 IngestionJob 失败: {str(e)}")
             else:
-                print("[RAG同步器提示] 缺少 KB_ID 或 DS_ID，请在 GitHub 中配置以启用自动同步")
+                print("[RAG同步器提示] 缺少 KB_ID 或 DS_ID，无法触发自动同步")
+        else:
+            # 经典代码手动挡：同步执行分块、嵌入和 Pinecone 插入（适用于文件较小或本地测试）
+            print(f"[RAG驱动] 正在以 MANUAL 模式执行本地嵌入...")
+            await process_into_vectorstore(temp_path, file.filename)
+            upload_msg += "（手动挡嵌入已完成）"
 
         
         return {
