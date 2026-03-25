@@ -100,87 +100,95 @@ graph TD
 ```mermaid
 graph TD
     Client["前端 UI (Amplify 托管 React)"] <--> APIGW["API Gateway (网关)"]
-    APIGW <--> Lambda["AWS Lambda (FastAPI + RAG 核心)"]
+    APIGW <--> Lambda_API["API Lambda (接收器)"]
     
-    Lambda --> S3[("AWS S3 (持久存储文档)")]
+    Lambda_API --> S3[("AWS S3 (持久存储文档)")]
+    Lambda_API --> DB_Tasks[("DynamoDB (任务状态追踪)")]
     
-    subgraph 第三方 SaaS 服务
-        Lambda -- "查询/入库" --> PC[("Pinecone (4096维)")]
-        Lambda -- "Embedding" --> MSE["ModelScope (Qwen3-Embedding-8B)"]
-        Lambda -- "LLM QA" --> MSL["ModelScope (Qwen3.5-122B-A10B)"]
+    S3 -- "ObjectCreated 事件" --> Lambda_Worker["Worker Lambda (异步处理器)"]
+    
+    subgraph RAG 核心链路
+        Lambda_Worker -- "分片 & 向量化" --> MSE["ModelScope (Qwen3-Embedding-8B)"]
+        Lambda_Worker -- "写入索引" --> PC[("Pinecone (4096维)")]
+        
+        Lambda_API -- "同步对话检索" --> PC
+        Lambda_API -- "同步对话生成" --> MSL["ModelScope (Qwen3.5-122B-A10B)"]
     end
 ```
 
-#### 2. 系统核心数据流转图 (RAG 工作流)
+#### 2. 系统核心数据流转图 (RAG 双轨工作流)
 
-以下流程序列图清晰展示了“上传建库”与“检索问答”两条核心主线中，每一个网关与组件触发的真正逻辑与先后流转顺序：
+以下流程序列图展示了**异步上传任务**（发号牌轮询）与**同步对话请求**两条并行主线：
 
 ```mermaid
 sequenceDiagram
-    participant User as 用户前端 (Amplify)
-    participant Lambda as 后端引擎 (AWS Lambda)
-    participant S3 as 对象存储 (AWS S3)
-    participant Embed as 向量大模型 (ModelScope)
-    participant VectorDB as 向量数据库 (Pinecone)
-    participant LLM as 对话大模型 (ModelScope)
+    participant U as 用户 (React/Amplify)
+    participant A as API Lambda
+    participant S as AWS S3
+    participant D as DynamoDB (Tasks)
+    participant W as Worker Lambda
+    participant R as RAG Engine (Shared)
 
-    rect rgb(240, 248, 255)
-        Note over User, LLM: 流程 1：文档上传与向量化建库 (Ingestion)
-        User->>Lambda: 1. 上传 PDF/TXT 源文档
-        Lambda->>S3: 2. 将源文件原样备份至持久化云盘 S3 留底
-        Lambda->>Lambda: 3. 解析该篇文档并切分为成百上千个小文本块 (Chunks)
-        Lambda->>Embed: 4. 请求 Embed 引擎将这些纯文本转换为 4096 维的数字向量
-        Embed-->>Lambda: 5. 返回文本块对应的向量矩阵模型
-        Lambda->>VectorDB: 6. [核心入库] 将原始文本块与高维数字向量一对一存入 Pinecone 并建立高维索引树
-        Lambda-->>User: 7. 返回“建库成功”，您在侧边栏渲染出最新文档列表
+    Note over U, R: --- 流程 1：异步文档上传与建库 (Async Ingestion) ---
+    U->>A: 1. 上传 PDF (POST /api/upload)
+    A->>D: 2. 挂号: {task_id, status: 'PENDING'}
+    A->>S: 3. 保存物理文件
+    A-->>U: 4. 立即返回 {task_id} (秒回)
+    
+    S->>W: 5. 触发 S3:ObjectCreated 事件
+    W->>D: 6. 状态更新: PROCESSING
+    W->>R: 7. 执行解析/向量化并写入 Pinecone
+    W->>D: 8. 状态更新: COMPLETED
+    
+    loop 前端根据 task_id 轮询
+        U->>A: GET /api/tasks/{task_id}
+        A->>D: 查询进度
+        A-->>U: 返回实况 (生成进度条)
     end
 
-    rect rgb(245, 255, 250)
-        Note over User, LLM: 流程 2：知识库自动问答检索 (RAG Q&A)
-        User->>Lambda: 1. 在对话框发送一段自然语言提问
-        Lambda->>Embed: 2. 也是调用 Embed 引擎将“提问字符串”转化为与其性质相同的 4096 维向量
-        Embed-->>Lambda: 3. 返回提问查询专用向量
-        Lambda->>VectorDB: 4. 向 Pinecone 发起向量库余弦相似度检索 (寻找距离该提问向量最近的 Top-K 文本块)
-        VectorDB-->>Lambda: 5. Pinecone 精确召回包含答案上下文的几段权威真实文档原文
-        Lambda->>Lambda: 6. 拼积木式组装：[系统设定的严谨 Prompt要求] + [系统刚捞出的长篇片段] + [您的提问]
-        Lambda->>LLM: 7. 将这个“积木”作为巨型文本发给 122B 千亿参数底座 LLM 进行无死角阅读推理
-        LLM-->>Lambda: 8. LLM 乖巧地仅根据那几段片段总结出精准答案，拒绝发散
-        Lambda-->>User: 9. 最终把大白话推送在网页聊天框中输出
-    end
+    Note over U, R: --- 流程 2：同步对话问答 (Sync Q&A) ---
+    U->>A: A. 发送提问 (POST /api/chat)
+    A->>R: B. 调用 RAG 检索链 (召回索引 -> 生成答案)
+    R-->>A: C. 返回最终推理摘要
+    A-->>U: D. 即时呈现对话结果 (约 5-15s)
 ```
 
 #### 3. 跨实体系统综合拓扑图 (直连线与数据流向)
 
-这也是最适合整体打包讲解的“全景连线图”。我们用蓝色**实线**代表文档进场被切成碎片的【上传入库管道】，用红色**虚线**代表向大模型询问提款的【检索问答管道】：
+我们采用最新的 **异步对账流 (Asynchronous Reconciliation Flow)** 模式：
 
 ```mermaid
 graph TD
-    UI[前端浏览器]
-    APIGW[API_Gateway入口]
-    Lambda[AWS_Lambda核心集群]
-    S3[(Amazon_S3存储)]
-    Pinecone[(Pinecone向量库)]
-    ModelScopeE[魔搭_Embedding引擎]
-    ModelScopeL[魔搭_LLM大脑]
+    UI[React 前端]
+    APIGW[API Gateway]
+    Lambda_API[API Lambda]
+    Lambda_Worker[Worker Lambda]
+    S3[(S3 存储桶)]
+    DDB[(DynamoDB 任务表)]
+    Pinecone[(Pinecone 向量库)]
+    ModelScope[ModelScope 大模型]
 
-    %% Ingestion Flow (建库流程)
-    UI -->|建库 1. 上传源文档| APIGW
-    APIGW -->|建库 2. 流量透明转发| Lambda
-    Lambda -->|建库 3. 留底长期保存| S3
-    Lambda -->|建库 4. 解析输送切片| ModelScopeE
-    ModelScopeE -->|建库 5. 返回高维向量| Lambda
-    Lambda -->|建库 6. 锚定片段双入库| Pinecone
+    %% 异步入库线 (Asynchronous Ingestion)
+    UI -- "1. 上传 (POST)" --> APIGW
+    APIGW -- "2. 转发" --> Lambda_API
+    Lambda_API -- "3. 存档" --> S3
+    Lambda_API -- "4. 挂号" --> DDB
+    Lambda_API -- "5. 秒回 OK" --> UI
+    
+    S3 -- "6. 触发任务" --> Lambda_Worker
+    Lambda_Worker -- "7. 调用推理" --> ModelScope
+    ModelScope -- "8. 返回向量" --> Lambda_Worker
+    Lambda_Worker -- "9. 入库" --> Pinecone
+    Lambda_Worker -- "10. 消号 (COMPLETED)" --> DDB
 
-    %% Q&A Flow (检索流程)
-    UI -->|检索 A. 自然提问| APIGW
-    APIGW -->|检索 B. 路由动作| Lambda
-    Lambda -->|检索 C. 提问词编码| ModelScopeE
-    ModelScopeE -->|检索 D. 获取纯查询向量| Lambda
-    Lambda -->|检索 E. 全库搜寻相似度| Pinecone
-    Pinecone -->|检索 F. 命中相关原文| Lambda
-    Lambda -->|检索 G. 拼装Prompt推理| ModelScopeL
-    ModelScopeL -->|检索 H. 生成优质摘要| Lambda
-    Lambda -->|检索 I. 返回大白话输出| UI
+    %% 状态查询线 (Polling)
+    UI -. "A. 查询进度" .-> DDB
+
+    %% 同步问答线 (Sync QA)
+    UI == "B. 提问 (POST)" ==> Lambda_API
+    Lambda_API == "RAG 核心" ==> Pinecone
+    Lambda_API == "文本生成" ==> ModelScope
+    Lambda_API == "C. 即时回复" ==> UI
 ```
 
 ### 5. 核心架构：异步轮询 (Asynchronous Polling)

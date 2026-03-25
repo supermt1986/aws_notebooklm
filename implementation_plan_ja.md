@@ -5,54 +5,62 @@
 目的: NotebookLM に似た個人用ナレッジベース Q&A ツール (RAG システム) を開発する。
 コア戦略: **インフラストラクチャ (ストレージ、コンピューティング、フロントエンド) は、すべてワンストップで AWS ネイティブサービスを直接採用する。** しかし、コストに最も敏感な「モデル推論」と「ベクトルデータベース」の 2 つの領域では、コード内に双方向アダプター (Toggle) を内蔵し、設定パラメータを通じて無料版と高価な純粋 AWS 版をシームレスに切り替え可能にする。
 
-## 1. 展開アーキテクチャ図（依存関係ビュー）
+#### 1. 静的インフラストラクチャー展開図 (依存関係)
 
 ```mermaid
 graph TD
-    Client["フロントエンド UI (Amplify 托管 React)"] <--> APIGW["API Gateway (ゲートウェイ)"]
-    APIGW <--> Lambda["AWS Lambda (FastAPI + RAG コア)"]
+    Client["フロントエンド UI (Amplify)"] <--> APIGW["API Gateway"]
+    APIGW <--> Lambda_API["API Lambda (レシーバー)"]
     
-    Lambda --> S3[("AWS S3 (永続的ドキュメント保存)")]
+    Lambda_API --> S3[("AWS S3 (原本保存)")]
+    Lambda_API --> DB_Tasks[("DynamoDB (タスク追跡)")]
     
-    subgraph 第三者 SaaS サービス
-        Lambda -- "検索/保存" --> PC[("Pinecone (4096次元)")]
-        Lambda -- "Embedding" --> MSE["ModelScope (Qwen3-Embedding-8B)"]
-        Lambda -- "LLM QA" --> MSL["ModelScope (Qwen3.5-122B-A10B)"]
+    S3 -- "ObjectCreated イベント" --> Lambda_Worker["Worker Lambda (非同期処理)"]
+    
+    subgraph RAG コアエンジン
+        Lambda_Worker -- "ベクトル化" --> MSE["ModelScope (Qwen3-Embedding-8B)"]
+        Lambda_Worker -- "インデックス登録" --> PC["Pinecone (4096次元)"]
+        
+        Lambda_API -- "同期検索" --> PC
+        Lambda_API -- "同期推論" --> MSL["ModelScope (122B LLM)"]
     end
 ```
 
-## 2. コア基盤とデータフロー (RAG ワークフロー)
+#### 2. コア基盤とデータフロー (RAG デュアルワークフロー)
 
-以下のシーケンス/フローチャートは、「アップロードとインデックス作成」および「検索とレスポンス生成」の 2 つの主要なプロセスで、データがどのように流れるかを明確に示しています。
+以下のシーケンス図は、**非同期インデックス作成**（ポーリング方式）と**同期 Q&A リクエスト**の 2 つの並行プロセスを示しています。
 
 ```mermaid
-graph TD
-    UI[フロントエンド]
-    APIGW[API_Gateway_入口]
-    Lambda[AWS_Lambda_クラスター]
-    S3[(Amazon_S3_ストレージ)]
-    Pinecone[(Pinecone_ベクトルDB)]
-    ModelScopeE[魔搭_Embeddingエンジン]
-    ModelScopeL[魔搭_LLMブレイン]
+sequenceDiagram
+    participant U as ユーザー (React/Amplify)
+    participant A as API Lambda
+    participant S as AWS S3
+    participant D as DynamoDB (Tasks)
+    participant W as Worker Lambda
+    participant R as RAG Engine (Shared)
 
-    %% Ingestion Flow (インデックス作成)
-    UI -- 1. ソースドキュメントをアップロード --> APIGW
-    APIGW -- 2. ペイロードを転送 --> Lambda
-    Lambda -- 3. 原本を永続保存 --> S3
-    Lambda -- 4. テキストチャンクを送信 --> ModelScopeE
-    ModelScopeE -- 5. 4096次元の高次元ベクトルを返す --> Lambda
-    Lambda -- 6. チャンクとベクトルを紐付けて保存 --> Pinecone
+    Note over U, R: --- 1. 非同期インデックス作成 (Async Ingestion) ---
+    U->>A: 1. アップロード (POST /api/upload)
+    A->>D: 2. タスク登録: {task_id, status: 'PENDING'}
+    A->>S: 3. ファイル保存
+    A-->>U: 4. task_id を即時返却 (秒速レスポンス)
+    
+    S->>W: 5. S3:ObjectCreated イベント発火
+    W->>D: 6. ステータス更新: PROCESSING
+    W->>R: 7. ベクトル化 & Pinecone 登録
+    W->>D: 8. ステータス更新: COMPLETED
+    
+    loop フロントエンドでのポーリング
+        U->>A: GET /api/tasks/{task_id}
+        A->>D: 進捗照会
+        A-->>U: 現在のステータスを返却
+    end
 
-    %% Q&A Flow (検索)
-    UI -. A. 自然言語の質問を送信 .-> APIGW
-    APIGW -. B. 質問をルーティング .-> Lambda
-    Lambda -. C. 質問をエンコード用に送信 .-> ModelScopeE
-    ModelScopeE -. D. クエリベクトルを取得 .-> Lambda
-    Lambda -. E. ベクトルを基に類似度検索 .-> Pinecone
-    Pinecone -. F. 高精度な関連パラグラフを返却 .-> Lambda
-    Lambda -. G. プロンプトとコンテキストをまとめ推論へ .-> ModelScopeL
-    ModelScopeL -. H. テキストに基づいて回答を生成 .-> Lambda
-    Lambda -. I. フロントエンドに即座に出力 .-> UI
+    Note over U, R: --- 2. 同期の対話・検索 (Sync Q&A) ---
+    U->>A: A. 質問を送信 (POST /api/chat)
+    A->>R: B. RAG チェーンの実行 (検索 -> 生成)
+    R-->>A: C. 回答のサマリーを返却
+    A-->>U: D. 即座に回答を表示 (約 5-15秒)
 ```
 
 ### コアコンポーネントの説明
