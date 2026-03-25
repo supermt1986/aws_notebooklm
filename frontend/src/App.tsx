@@ -55,6 +55,31 @@ function App() {
     }
   };
 
+  const pollTaskStatus = async (taskId: string) => {
+    const intervalId = setInterval(async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/tasks/${taskId}`);
+        const data = await response.json();
+
+        if (data.status === 'COMPLETED') {
+          clearInterval(intervalId);
+          setUploadStatus(`✅ ${t('sync_success')}`);
+          fetchDocuments();
+          // 5秒后清除状态提示
+          setTimeout(() => setUploadStatus(null), 5000);
+        } else if (data.status === 'FAILED') {
+          clearInterval(intervalId);
+          setUploadStatus(`❌ ${t('upload_fail')}: ${data.error_msg || 'Unknown error'}`);
+        } else {
+          // 正在处理中 (PENDING / PROCESSING)
+          setUploadStatus(t('processing', { status: data.status }));
+        }
+      } catch (e) {
+        console.error("Polling error:", e);
+      }
+    }, 3000);
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -72,9 +97,18 @@ function App() {
         const errData = await response.json().catch(() => ({}));
         throw new Error(errData.detail || `Server returned ${response.status}`);
       }
-      await response.json(); // Consume response to prevent unhandled promise, but don't assign to avoid TS6133
-      setUploadStatus(`✅ ${t('upload_success')}`);
-      fetchDocuments();
+      const data = await response.json();
+      const taskId = data.task_id;
+
+      setUploadStatus(`⌛ ${t('upload_success')}`);
+      // 开始轮询后台进度
+      if (taskId) {
+        pollTaskStatus(taskId);
+      } else {
+        // 退避方案：如果是旧版接口或没返回 task_id
+        setUploadStatus(`✅ ${t('upload_success')}`);
+        fetchDocuments();
+      }
     } catch (err: any) {
       setUploadStatus(`❌ ${t('upload_fail')}: ${err.message}`);
     }

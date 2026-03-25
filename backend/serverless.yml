@@ -31,6 +31,7 @@ provider:
     RETRIEVER_MODE: ${env:RETRIEVER_MODE, 'MANUAL'}
     KNOWLEDGE_BASE_ID: ${env:KNOWLEDGE_BASE_ID, ''}
     DATA_SOURCE_ID: ${env:DATA_SOURCE_ID, ''}
+    TASKS_TABLE: ${self:service}-${sls:stage}-tasks
 
 functions:
   api:
@@ -44,11 +45,37 @@ functions:
           path: '/{proxy+}'
           method: '*'
 
+  processor:
+    # 异步的工作进程，处理重负载任务
+    handler: worker.handler
+    timeout: 300 # 5 分钟超时，足够处理大文件
+    events:
+      - s3:
+          bucket: ${env:AWS_S3_BUCKET_NAME}
+          event: s3:ObjectCreated:*
+          rules:
+            - prefix: uploads/
+          existing: true # 使用已存在的存储桶
+
+resources:
+  Resources:
+    TasksTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-${sls:stage}-tasks
+        AttributeDefinitions:
+          - AttributeName: task_id
+            AttributeType: S
+        KeySchema:
+          - AttributeName: task_id
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+
 plugins:
   - serverless-python-requirements
 
 custom:
   pythonRequirements:
-    dockerizePip: non-linux
+    dockerizePip: false
     zip: true
     slim: true

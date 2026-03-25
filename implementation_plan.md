@@ -373,22 +373,18 @@ graph TD
 - `MANUAL` (默认): 自定义 Lambda 切片器 + ModelScope 嵌入。
 - `BEDROCK_KB`: 通过 `AmazonKnowledgeBasesRetriever` 调用 AWS 原生检索接口。
 
-## 8. Ingestion 自动化与性能优化 (最新进展)
+## 8. 异步轮询架构 (方案 B: 最终生产演进)
 
-为了提升生产体验，我们在 RAG 链路中加入了自动化挂钩与防超时逻辑：
+由于部分 AWS 环境对公网 Lambda Function URL 存在权限限制（403），我们正式引入基于 **SQS/S3 Trigger + DynamoDB** 的异步处理模型，彻底绕过 29 秒超时限制。
 
-### 8.1 “上传即同步”自动化
-*   **逻辑**：在 `app.py` 的文档上传接口中，当模式为 `BEDROCK_KB` 时，后端会自动抓取 `DATA_SOURCE_ID` 并调用 `bedrock-agent` 的 `start_ingestion_job`。
-*   **结果**：用户无需再去 AWS 控制台点击同步，文档入库后即刻可用。
+### 8.1 异步处理流 (Flow)
+1.  **用户上传**：`POST /api/upload` 仅负责将文件流写入 S3。
+2.  **任务注册**：后端在 `TasksTable` 中注册一条 `status=PENDING` 的记录，并立即返回 `task_id`。
+3.  **后台触发**：S3 的 `ObjectCreated` 事件自动触发一个新的 **Worker Lambda**。
+4.  **耗时任务**：Worker Lambda 在后台执行切片、嵌入（ModelScope）或知识库同步。完成后更新 `TasksTable` 状态为 `COMPLETED`。
+5.  **前端对账**：前端 React 通过 `GET /api/tasks/{task_id}` 进行 3-5 秒一次的轮询。
 
-### 8.2 29s 超时防御策略 (分流优化)
-*   **问题**：API Gateway 的 29 秒硬性限制与慢速模型嵌入（ModelScope）存在冲突。
-*   **对策**：
-    *   **KB 模式**：禁用由于本地 Embedding，仅执行 S3 上传与轻量级同步触发。上传响应速度提升 90% 以上。
-    *   **Manual 模式**：仅在文件较小时使用。未来建议迁移至异步影子 Lambda。
-
-### 8.3 核心环境变量概览
-部署时需在 GitHub Secrets/Variables 中配置：
-- `RETRIEVER_MODE`: `BEDROCK_KB` 或 `MANUAL`
-- `KNOWLEDGE_BASE_ID`: Bedrock 知识库 ID
-- `DATA_SOURCE_ID`: S3 数据源 ID
+### 8.2 核心组件变更
+*   **DynamoDB**: 新增 `TasksTable` 用于追踪异步进度。
+*   **Lambda**: 新增 `s3_processor` 函数，配置 S3 事件源。
+*   **Frontend**: `App.tsx` 增加轮询 Hook。

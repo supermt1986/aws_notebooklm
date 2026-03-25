@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from adapters import get_llm, get_embeddings, get_vector_store
+from rag_engine import process_into_vectorstore
 
 # 【核心修复】强制指定所有涉及到 Token 计算的底层 C 库在 AWS Lambda 无头环境下的缓存目录至 /tmp，
 # 防止默认去挂载只读或不存在的 /home 目录引发 [Errno 2] No such file or directory 的隐形血案
@@ -95,125 +96,79 @@ async def delete_document(filename: str):
         from fastapi import HTTPException
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/tasks/{task_id}")
+async def get_task_status(task_id: str):
+    """
+    任务对账接口：前端轮询此接口获取异步处理进度
+    """
+    table_name = os.getenv("TASKS_TABLE")
+    if not table_name:
+        return {"status": "ERROR", "message": "未配置任务追踪表"}
+
+    try:
+        import boto3
+        db = boto3.resource('dynamodb', region_name=os.getenv("AWS_REGION", "ap-northeast-1"))
+        table = db.Table(table_name)
+        response = table.get_item(Key={'task_id': task_id})
+        
+        if 'Item' not in response:
+            return {"status": "NOT_FOUND", "message": "任务不存在"}
+            
+        return response['Item']
+    except Exception as e:
+        return {"status": "ERROR", "message": str(e)}
+
 @app.post("/api/upload")
 async def upload_document(file: UploadFile = File(...)):
     """
-    多模态文档上传接口：支持 PDF、图片和纯文本格式。
+    异步上传接口：文件存入 S3 后立即返回 task_id，后续处理交由后台 Worker
     """
-    content_type = file.content_type
-    is_image = content_type and content_type.startswith("image/")
-    doc_type = "图像资源" if is_image else "文档资源"
+    import boto3
+    import uuid
+    import io
+    import time
     
+    task_id = str(uuid.uuid4())
     s3_bucket = os.getenv("AWS_S3_BUCKET_NAME")
+    table_name = os.getenv("TASKS_TABLE")
+    
+    if not s3_bucket:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail="未配置 S3 Bucket，无法进行异步处理")
+
     try:
         content = await file.read()
-        if s3_bucket:
-            import boto3
-            import uuid
-            import io
-            s3_client = boto3.client('s3', region_name=os.getenv("AWS_REGION", "us-east-1"))
-            file_key = f"uploads/{uuid.uuid4().hex[:8]}_{file.filename}"
-            s3_client.upload_fileobj(io.BytesIO(content), s3_bucket, file_key)
-            upload_msg = f"成功持久化至真实的 AWS S3 ({s3_bucket})"
-        else:
-            upload_msg = "已暂存本地 (您尚未配置 AWS S3 Bucket)"
-            
-        # 将文件写入临时区，准备给后台解析引擎（或 Lambda Event）处理
-        import asyncio
-        temp_path = f"/tmp/{file.filename}"
-        with open(temp_path, "wb") as buffer:
-            buffer.write(content)
-            
-        # 【RAG 路径分流】根据当前模式选择最快的索引方式
-        retriever_mode = os.getenv("RETRIEVER_MODE", "MANUAL")
         
-        if retriever_mode == "BEDROCK_KB":
-            # 自动化托管模式：只管上传 S3 并触发 AWS 官方同步，极致提速
-            kb_id = os.getenv("KNOWLEDGE_BASE_ID")
-            ds_id = os.getenv("DATA_SOURCE_ID")
-            if kb_id and ds_id:
-                try:
-                    agent_client = boto3.client('bedrock-agent', region_name=os.getenv("AWS_REGION", "ap-northeast-1"))
-                    agent_client.start_ingestion_job(knowledgeBaseId=kb_id, dataSourceId=ds_id)
-                    print(f"[RAG同步器] 已成功触发 AWS KB 同步任务 (DS_ID: {ds_id})")
-                    upload_msg += "（自动同步任务已下达）"
-                except Exception as e:
-                    print(f"[RAG同步器错误] 触发 IngestionJob 失败: {str(e)}")
-            else:
-                print("[RAG同步器提示] 缺少 KB_ID 或 DS_ID，无法触发自动同步")
-        else:
-            # 经典代码手动挡：同步执行分块、嵌入和 Pinecone 插入（适用于文件较小或本地测试）
-            print(f"[RAG驱动] 正在以 MANUAL 模式执行本地嵌入...")
-            # 必须使用 await 同步等待向量化完成！
-            # 注意：在 MANUAL 模式下，我们会在这里进行本地 Embedding 并在 29s 内返回
-            await process_into_vectorstore(temp_path, file.filename)
-            upload_msg += "（手动挡嵌入已完成）"
+        # 1. 在 DynamoDB 挂号 (PENDING 状态)
+        db = boto3.resource('dynamodb', region_name=os.getenv("AWS_REGION", "ap-northeast-1"))
+        table = db.Table(table_name)
+        table.put_item(Item={
+            'task_id': task_id,
+            'filename': file.filename,
+            'status': 'PENDING',
+            'createdAt': int(time.time()),
+            'message': '文件已上传至 S3，等待后台解析...'
+        })
 
+        # 2. 物理上传至 S3 (/uploads/ 目录下)
+        s3_client = boto3.client('s3', region_name=os.getenv("AWS_REGION", "ap-northeast-1"))
+        # 注意：此处文件名带上前缀，方便 Worker 监听
+        file_key = f"uploads/{task_id}_{file.filename}"
+        s3_client.upload_fileobj(io.BytesIO(content), s3_bucket, file_key)
         
         return {
             "status": "success", 
-            "filename": file.filename, 
-            "content_type": content_type,
-            "message": f"[{doc_type}] {upload_msg} 且成功入库 Pinecone"
+            "task_id": task_id,
+            "filename": file.filename,
+            "message": "文件已安全存入云端，正在启动后台异步解析引擎..."
         }
     except Exception as e:
+        print(f"[异步上传崩溃] {str(e)}")
         from fastapi import HTTPException
-        print(f"[全局上传崩溃] {str(e)}")
-        raise HTTPException(status_code=500, detail=f"文档处理崩溃: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"上传失败: {str(e)}")
 
-async def process_into_vectorstore(file_path: str, filename: str):
-    from langchain_community.document_loaders import PyPDFLoader, TextLoader
-    from langchain_text_splitters import RecursiveCharacterTextSplitter
-    print(f"[RAG引擎] 开始对文件进行分块处理: {filename}")
-    try:
-        if file_path.lower().endswith(".pdf"):
-            loader = PyPDFLoader(file_path)
-        else:
-            loader = TextLoader(file_path, autodetect_encoding=True)
-            
-        docs = loader.load()
-        
-        # 【核心修复】因为物理文件用了 UUID，Loader 会默认把 metadata["source"] 写成 /tmp/abc...pdf。
-        # 我们必须在这把它强行还原回用户文件名的挂载路径，否则后续的 DELETE 按照 filename 进行过滤器清理时，将完全找不到这批幽灵切片！
-        for doc in docs:
-            doc.metadata["source"] = f"/tmp/{filename}"
-            
-        # 【RAG 精度回归】回退切片大小至 1000，确保语义向量更聚焦在具体条款。
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-        splits = text_splitter.split_documents(docs)
-        
-        # 【核心终局修复】彻底击碎 AWS Lambda 的多线程诅咒！
-        # Langchain 的 Pinecone 适配器默认强制并发，而 Pinecone Client 在初始化 ThreadPool 时需要挂载 Linux 的 /dev/shm 内存区块。
-        # AWS Lambda 的极简安全容器物理阉割了 /dev/shm，导致底层的 C 语言 SemLock(信号量锁)一创建就爆出无名 FileNotFoundError！
-        # 解决方案：完全手写单线程、全同步的 HTTP Upsert 发送器，物理越过多线程池！
-        provider = os.getenv("VECTOR_DB_PROVIDER", "pinecone")
-        if provider == "pinecone":
-            from pinecone import Pinecone
-            import uuid
-            pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
-            index = pc.Index(os.getenv("PINECONE_INDEX", "notebooklm-clone"))
-            embeddings = get_embeddings()
-            
-            batch_size = 32
-            for i in range(0, len(splits), batch_size):
-                batch = splits[i:i+batch_size]
-                texts = [doc.page_content for doc in batch]
-                metas = [doc.metadata.copy() for doc in batch]
-                for m, t in zip(metas, texts):
-                    m["text"] = t
-                ids = [str(uuid.uuid4()) for _ in batch]
-                vecs = embeddings.embed_documents(texts)
-                index.upsert(vectors=list(zip(ids, vecs, metas)))
-        else:
-            vector_store = get_vector_store()
-            vector_store.add_documents(splits)
-            
-        print(f"[RAG引擎] {filename} 处理完毕！纯同步模式已安全注入了 {len(splits)} 个语义切片到 Vector 边界。")
-    except Exception as e:
-        import traceback
-        traceback.print_exc()  # 打印完整堆栈到 CloudWatch 供核查死因
-        print(f"[RAG引擎错误] 处理 {filename} 时崩溃: {e}")
-        raise ValueError(f"向量神经元切片抛出异常: {str(e)}")
+
+# -------------------------------------------------------------------------
 
 @app.post("/api/chat")
 async def chat_interaction(req: ChatRequest):

@@ -206,6 +206,22 @@ graph TD
 - `MANUAL` (デフォルト): カスタム Lambda チャンカー + ModelScope 埋め込み。
 - `BEDROCK_KB`: `AmazonKnowledgeBasesRetriever` を介して AWS ネイティブの検索インターフェースを呼び出し。
 
+## 11. 异步轮询アーキテクチャ (方案 B: 最終的な推移)
+
+一部の AWS 環境において Lambda Function URL への公網アクセスが制限（403 Forbidden）されていることを受け、より堅牢な **SQS/S3 Trigger + DynamoDB** による非同期処理モデルを正式に採用し、29 秒のタイムアウト制限を構造的に回避します。
+
+### 11.1 非同期処理フロー (Flow)
+1.  **ユーザーアップロード**: `POST /api/upload` は S3 へのファイル書き込みのみを担当。
+2.  **タスク登録**: バックエンドは `TasksTable` に `status=PENDING` のレコードを登録し、即座に `task_id` を返却（ここでのレスポンスは 1-2 秒）。
+3.  **バックグラウンド起動**: S3 の `ObjectCreated` 事件が新しい **Worker Lambda** を自動起動。
+4.  **重い処理の実行**: Worker Lambda がバックグラウンドで切片化、埋め込み（ModelScope）、またはナレッジベース同期を実行。完了後、`TasksTable` のステータスを `COMPLETED` に更新。
+5.  **フロントエンドのポーリング**: フロントエンド（React）は `GET /api/tasks/{task_id}` を使用して 3-5 秒おきに状態を確認。
+
+### 11.2 主要なコンポーネントの変更
+*   **DynamoDB**: 非同期進捗を追跡するための `TasksTable` を新設。
+*   **Lambda**: S3 イベントソースをトリガーとする `s3_processor` 函数を追加。
+*   **Frontend**: `App.tsx` にポーリング Hook を実装。
+
 ## 10. Ingestion の自動化とパフォーマンス最適化 (最新の進捗)
 
 開発・運用体験を向上させるため、RAG ワークフローに自動化フックとタイムアウト防止ロジックを導入しました。
