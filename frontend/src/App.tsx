@@ -179,7 +179,13 @@ function App() {
             <div className="upload-section" style={{ margin: 0, position: 'relative' }}>
               <label className="upload-btn">
                 {t('upload_btn')}
-                <input type="file" accept=".pdf,image/*,.txt,.md,.csv,.docx" hidden onChange={handleFileUpload} />
+                <input
+                  type="file"
+                  accept=".pdf,image/*,.txt,.md,.csv,.docx"
+                  hidden
+                  onClick={(e) => (e.currentTarget.value = '')}
+                  onChange={handleFileUpload}
+                />
               </label>
               {uploadStatus &&
                 <span className="status-text" style={{ position: 'absolute', top: '120%', right: '0', whiteSpace: 'nowrap' }}>
