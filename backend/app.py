@@ -144,6 +144,8 @@ async def upload_document(file: UploadFile = File(...)):
         else:
             # 经典代码手动挡：同步执行分块、嵌入和 Pinecone 插入（适用于文件较小或本地测试）
             print(f"[RAG驱动] 正在以 MANUAL 模式执行本地嵌入...")
+            # 必须使用 await 同步等待向量化完成！
+            # 注意：在 MANUAL 模式下，我们会在这里进行本地 Embedding 并在 29s 内返回
             await process_into_vectorstore(temp_path, file.filename)
             upload_msg += "（手动挡嵌入已完成）"
 
