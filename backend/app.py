@@ -198,15 +198,13 @@ async def chat_interaction(req: ChatRequest):
     """
     RAG 对话核心接口：检索向量库 -> 构建知识上下文 -> 询问底座大模型
     """
+    from .adapters import get_llm, get_retriever
     from langchain_core.prompts import ChatPromptTemplate
-    from langchain_core.runnables import RunnablePassthrough
-    from langchain_core.output_parsers import StrOutputParser
     
-    # 动态获取当前选定的模型和向量库（双轨架构生效点）
+    # 动态获取当前选定的模型和检索器（支持代码手动挡与 KB 托管挡切换）
     llm = get_llm()
-    vector_store = get_vector_store()
-    # 【检索调优】将 Top-K 从 4 猛增到 12，以大幅提升事实类问题和跨语言语义（如中文搜日文）的命中率
-    retriever = vector_store.as_retriever(search_kwargs={"k": 12})
+    # 【检索调优】底层根据 RETRIEVER_MODE 变量自动路由，并统一召回 Top-12 深度背景
+    retriever = get_retriever()
     
     template = """You are a professional AWS NotebookLM AI Assistant.
     Please answer the query based ONLY on the provided Context. 

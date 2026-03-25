@@ -73,3 +73,30 @@ def get_vector_store():
         return "OpenSearchStore(Placeholder)"
     else:
          raise ValueError(f"未知的 VectorDB 提供商: {provider}")
+
+def get_retriever():
+    """
+    RAG 检索器核心逻辑：支持代码手动挡（Manual）与 AWS 全托管（Bedrock KB）两种模式切换
+    """
+    mode = os.getenv("RETRIEVER_MODE", "MANUAL")
+    print(f"[Retriever Info] 当前检索模式: {mode}")
+
+    if mode == "BEDROCK_KB":
+        from langchain_aws import AmazonKnowledgeBasesRetriever
+        kb_id = os.getenv("KNOWLEDGE_BASE_ID")
+        if not kb_id:
+            raise ValueError("使用 BEDROCK_KB 模式必须提供 KNOWLEDGE_BASE_ID 环境变量")
+        
+        return AmazonKnowledgeBasesRetriever(
+            knowledge_base_id=kb_id,
+            retrieval_config={
+                "vectorSearchConfiguration": {
+                    "numberOfResults": 12 # 保持与手动模式一致的召回孔径
+                }
+            }
+        )
+    else:
+        # 默认使用手动接入模式 (Manual Mode: Local Splitter + ModelScope Embeddings + Raw Pinecone)
+        vector_store = get_vector_store()
+        return vector_store.as_retriever(search_kwargs={"k": 12})
+
