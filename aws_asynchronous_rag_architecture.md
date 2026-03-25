@@ -35,10 +35,10 @@ graph TD
 
     %% 2. 同步对话流水线 (Sync QA)
     Client == "A. 自然语言提问 (POST /chat)" ==> APIGW
-    APIGW ==>| "B. 实时请求" | Lambda_API
-    Lambda_API ==>| "C. 检索 & 生成" | RagEngine
-    RagEngine ==>| "D. 答案摘要" | Lambda_API
-    Lambda_API ==>| "E. 即时回复" | Client
+    APIGW == "B. 实时请求" ==> Lambda_API
+    Lambda_API == "C. 检索 & 生成" ==> RagEngine
+    RagEngine == "D. 答案摘要" ==> Lambda_API
+    Lambda_API == "E. 即时回复" ==> Client
 ```
 
 ## 2. 详细时序图 (Sequence Diagram)
