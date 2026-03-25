@@ -84,6 +84,9 @@ function App() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // 【重要修复】重置 input 的 value，确保选择同一个文件也能触发 onChange
+    e.target.value = '';
+
     const formData = new FormData();
     formData.append('file', file);
     setUploadStatus(`⏳ ${t('uploading')}`);
@@ -108,9 +111,11 @@ function App() {
         // 退避方案：如果是旧版接口或没返回 task_id
         setUploadStatus(`✅ ${t('upload_success')}`);
         fetchDocuments();
+        setTimeout(() => setUploadStatus(null), 5000);
       }
     } catch (err: any) {
       setUploadStatus(`❌ ${t('upload_fail')}: ${err.message}`);
+      setTimeout(() => setUploadStatus(null), 10000);
     }
   };
 
@@ -123,10 +128,13 @@ function App() {
         method: 'DELETE',
       });
       if (!response.ok) throw new Error("Delete API failed");
-      setUploadStatus(t('delete_success'));
+      setUploadStatus(`🗑️ ${t('delete_success')}`);
       fetchDocuments();
+      // 3秒后自动清除删除成功的状态，避免干扰后续上传
+      setTimeout(() => setUploadStatus(null), 3000);
     } catch (e) {
-      setUploadStatus(t('delete_fail'));
+      setUploadStatus(`❌ ${t('delete_fail')}`);
+      setTimeout(() => setUploadStatus(null), 5000);
     }
   };
 
