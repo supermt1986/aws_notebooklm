@@ -30,4 +30,4 @@ cd frontend && npm install && npm run dev
 
 # バックエンドの起動 (仮想環境内)
 cd backend && pip install -r requirements.txt && python app.py
-```
+``` 
