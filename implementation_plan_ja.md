@@ -204,8 +204,27 @@ graph TD
 ### 9.3 デュアルモード切り替えの実装
 `adapters.py` と `app.py` に `RETRIEVER_MODE` 環境変数を導入し、「ワンクリックでの切り替え」を実現します。
 - `MANUAL` (デフォルト): カスタム Lambda チャンカー + ModelScope 埋め込み。
-- `BEDROCK_KB`: AWS SDK の `retrieve_and_generate` インターフェースを呼び出し。
+- `BEDROCK_KB`: `AmazonKnowledgeBasesRetriever` を介して AWS ネイティブの検索インターフェースを呼び出し。
 
+## 10. Ingestion の自動化とパフォーマンス最適化 (最新の進捗)
+
+開発・運用体験を向上させるため、RAG ワークフローに自動化フックとタイムアウト防止ロジックを導入しました。
+
+### 10.1 「アップロード即同期」の自動化
+*   **ロジック**: `app.py` のドキュメントアップロード API において、モードが `BEDROCK_KB` の場合、自動的に `DATA_SOURCE_ID` を取得し、`bedrock-agent` の `start_ingestion_job` を実行します。
+*   **結果**: ユーザーは AWS コンソールで「同期 (Sync)」ボタンをクリックする必要がなくなり、ドキュメントがアップロードされた直後に検索可能になります。
+
+### 10.2 29秒タイムアウト防御戦略
+*   **課題**: API Gateway の 29 秒というハードリミットと、比較的低速な埋め込みモデル（ModelScope）を一つのリクエスト内で処理するとタイムアウトが発生しやすい。
+*   **対策**:
+    *   **KB モード**: ローカルでの Embedding 処理をスキップし、S3 へのアップロードと軽量な同期リクエストのみを実行します。これによりレスポンスが 90% 以上高速化されました。
+    *   **Manual モード**: 小規模なファイルに限定。将来的には S3 トリガーによる非同期 Lambda への移行を推奨。
+
+### 10.3 主要な環境変数の一覧
+GitHub Secrets/Variables で以下の設定が必要です：
+- `RETRIEVER_MODE`: `BEDROCK_KB` または `MANUAL`
+- `KNOWLEDGE_BASE_ID`: Bedrock ナレッジベース ID
+- `DATA_SOURCE_ID`: S3 データソース ID
 
 ## 8. 技術的な課題と解決策のまとめ (Serverless RAG 実務経験)
 

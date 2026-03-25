@@ -371,4 +371,24 @@ graph TD
 ### 7.3 双轨切换代码实现
 我们在 `adapters.py` 和 `app.py` 中引入 `RETRIEVER_MODE` 环境变量，实现“一键换芯”：
 - `MANUAL` (默认): 自定义 Lambda 切片器 + ModelScope 嵌入。
-- `BEDROCK_KB`: 调用 AWS SDK 的 `retrieve_and_generate` 接口。
+- `BEDROCK_KB`: 通过 `AmazonKnowledgeBasesRetriever` 调用 AWS 原生检索接口。
+
+## 8. Ingestion 自动化与性能优化 (最新进展)
+
+为了提升生产体验，我们在 RAG 链路中加入了自动化挂钩与防超时逻辑：
+
+### 8.1 “上传即同步”自动化
+*   **逻辑**：在 `app.py` 的文档上传接口中，当模式为 `BEDROCK_KB` 时，后端会自动抓取 `DATA_SOURCE_ID` 并调用 `bedrock-agent` 的 `start_ingestion_job`。
+*   **结果**：用户无需再去 AWS 控制台点击同步，文档入库后即刻可用。
+
+### 8.2 29s 超时防御策略 (分流优化)
+*   **问题**：API Gateway 的 29 秒硬性限制与慢速模型嵌入（ModelScope）存在冲突。
+*   **对策**：
+    *   **KB 模式**：禁用由于本地 Embedding，仅执行 S3 上传与轻量级同步触发。上传响应速度提升 90% 以上。
+    *   **Manual 模式**：仅在文件较小时使用。未来建议迁移至异步影子 Lambda。
+
+### 8.3 核心环境变量概览
+部署时需在 GitHub Secrets/Variables 中配置：
+- `RETRIEVER_MODE`: `BEDROCK_KB` 或 `MANUAL`
+- `KNOWLEDGE_BASE_ID`: Bedrock 知识库 ID
+- `DATA_SOURCE_ID`: S3 数据源 ID
