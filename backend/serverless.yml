@@ -36,6 +36,8 @@ functions:
   api:
     # 指向 app.py 里的 handler (Mangum 包裹实例)
     handler: app.handler
+    url:
+      cors: true # 开启跨域支持，方便前端直连
     events:
       - httpApi:
           path: '/{proxy+}'
