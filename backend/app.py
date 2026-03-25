@@ -147,20 +147,35 @@ async def upload_document(file: UploadFile = File(...)):
             'filename': file.filename,
             'status': 'PENDING',
             'createdAt': int(time.time()),
-            'message': '文件已上传至 S3，等待后台解析...'
+            'message': '文件已上传，排队等待解析中...'
         })
 
-        # 2. 物理上传至 S3 (/uploads/ 目录下)
+        # 2. 物理上传至 S3
         s3_client = boto3.client('s3', region_name=os.getenv("AWS_REGION", "ap-northeast-1"))
-        # 注意：此处文件名带上前缀，方便 Worker 监听
         file_key = f"uploads/{task_id}_{file.filename}"
         s3_client.upload_fileobj(io.BytesIO(content), s3_bucket, file_key)
+        
+        # 3. 将任务推送至 SQS 队列 (异步削峰的关键)
+        sqs_url = os.getenv("TASKS_QUEUE_URL")
+        if sqs_url:
+            import json
+            sqs_client = boto3.client('sqs', region_name=os.getenv("AWS_REGION", "ap-northeast-1"))
+            message_body = {
+                "task_id": task_id,
+                "bucket": s3_bucket,
+                "key": file_key,
+                "filename": file.filename
+            }
+            sqs_client.send_message(
+                QueueUrl=sqs_url,
+                MessageBody=json.dumps(message_body)
+            )
+            print(f"[API] 已向 SQS 发送任务消息: {task_id}")
         
         return {
             "status": "success", 
             "task_id": task_id,
-            "filename": file.filename,
-            "message": "文件已安全存入云端，正在启动后台异步解析引擎..."
+            "message": "文件上传成功，RAG 解析任务已加入队列"
         }
     except Exception as e:
         print(f"[异步上传崩溃] {str(e)}")

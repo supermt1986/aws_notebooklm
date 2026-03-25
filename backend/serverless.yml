@@ -32,6 +32,7 @@ provider:
     KNOWLEDGE_BASE_ID: ${env:KNOWLEDGE_BASE_ID, ''}
     DATA_SOURCE_ID: ${env:DATA_SOURCE_ID, ''}
     TASKS_TABLE: ${self:service}-${sls:stage}-tasks
+    TASKS_QUEUE_URL: { Ref: TasksQueue }
 
 functions:
   api:
@@ -46,16 +47,13 @@ functions:
           method: '*'
 
   processor:
-    # 异步的工作进程，处理重负载任务
+    # 异步的工作进程，处理从 SQS 领取的任务
     handler: worker.handler
     timeout: 300 # 5 分钟超时，足够处理大文件
     events:
-      - s3:
-          bucket: ${env:AWS_S3_BUCKET_NAME}
-          event: s3:ObjectCreated:*
-          rules:
-            - prefix: uploads/
-          existing: true # 使用已存在的存储桶
+      - sqs:
+          arn: { Fn::GetAtt: [TasksQueue, Arn] }
+          batchSize: 1 # 每次处理一个文件，确保稳定性
 
 resources:
   Resources:
@@ -70,6 +68,20 @@ resources:
           - AttributeName: task_id
             KeyType: HASH
         BillingMode: PAY_PER_REQUEST
+
+    TasksQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service}-${sls:stage}-tasks-queue
+        VisibilityTimeout: 300 # 与 Lambda 超时对齐
+        RedrivePolicy:
+          deadLetterTargetArn: { Fn::GetAtt: [TasksDLQ, Arn] }
+          maxReceiveCount: 3 # 失败 3 次后进入死信队列
+
+    TasksDLQ:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service}-${sls:stage}-tasks-dlq
 
 plugins:
   - serverless-python-requirements

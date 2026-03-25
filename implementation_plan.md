@@ -102,55 +102,42 @@ graph TD
     Client["前端 UI (Amplify 托管 React)"] <--> APIGW["API Gateway (网关)"]
     APIGW <--> Lambda_API["API Lambda (接收器)"]
     
-    Lambda_API --> S3[("AWS S3 (持久存储文档)")]
-    Lambda_API --> DB_Tasks[("DynamoDB (任务状态追踪)")]
+    Lambda_API -- "1. 上传文件" --> S3[("AWS S3 (原本存)")]
+    Lambda_API -- "2. 发送任务" --> SQS["AWS SQS (任务队列)"]
     
-    S3 -- "ObjectCreated 事件" --> Lambda_Worker["Worker Lambda (异步处理器)"]
+    SQS -- "触发处理" --> Lambda_Worker["Worker Lambda (异步器)"]
+    Lambda_Worker -- "异常重试失败" --> DLQ["AWS SQS (死信队列 DLQ)"]
     
     subgraph RAG 核心链路
-        Lambda_Worker -- "分片 & 向量化" --> MSE["ModelScope (Qwen3-Embedding-8B)"]
-        Lambda_Worker -- "写入索引" --> PC[("Pinecone (4096维)")]
-        
-        Lambda_API -- "同步对话检索" --> PC
-        Lambda_API -- "同步对话生成" --> MSL["ModelScope (Qwen3.5-122B-A10B)"]
+        Lambda_Worker -- "向量化" --> MSE["ModelScope (Qwen3-Embed)"]
+        Lambda_Worker -- "写入索引" --> PC["Pinecone (4096维)"]
     end
 ```
 
-#### 2. 系统核心数据流转图 (RAG 双轨工作流)
-
-以下流程序列图展示了**异步上传任务**（发号牌轮询）与**同步对话请求**两条并行主线：
+#### 2. 系统核心数据流转图 (RAG 异步削峰工作流)
 
 ```mermaid
 sequenceDiagram
-    participant U as 用户 (React/Amplify)
+    participant U as 用户 (React)
     participant A as API Lambda
     participant S as AWS S3
-    participant D as DynamoDB (Tasks)
+    participant Q as SQS (Queue)
     participant W as Worker Lambda
-    participant R as RAG Engine (Shared)
+    participant D as DynamoDB (Tasks)
 
-    Note over U, R: --- 流程 1：异步文档上传与建库 (Async Ingestion) ---
-    U->>A: 1. 上传 PDF (POST /api/upload)
-    A->>D: 2. 挂号: {task_id, status: 'PENDING'}
-    A->>S: 3. 保存物理文件
-    A-->>U: 4. 立即返回 {task_id} (秒回)
+    Note over U, W: --- 流程 1：异步入库 (Ingestion) ---
+    U->>A: 1. 上传文件 (POST /upload)
+    A->>S: 2. 存档物理文件
+    A->>D: 3. 初始化任务状态
+    A->>Q: 4. 推送任务消息 {task_id, bucket, key}
+    A-->>U: 5. 立即返回 task_id
     
-    S->>W: 5. 触发 S3:ObjectCreated 事件
-    W->>D: 6. 状态更新: PROCESSING
-    W->>R: 7. 执行解析/向量化并写入 Pinecone
-    W->>D: 8. 状态更新: COMPLETED
+    Q->>W: 6. 自动触发 (触发器)
+    W->>D: 7. 更新状态: PROCESSING
+    W->>W: 8. 执行 RAG 向量化解析
+    W->>D: 9. 更新状态: COMPLETED
     
-    loop 前端根据 task_id 轮询
-        U->>A: GET /api/tasks/{task_id}
-        A->>D: 查询进度
-        A-->>U: 返回实况 (生成进度条)
-    end
-
-    Note over U, R: --- 流程 2：同步对话问答 (Sync Q&A) ---
-    U->>A: A. 发送提问 (POST /api/chat)
-    A->>R: B. 调用 RAG 检索链 (召回索引 -> 生成答案)
-    R-->>A: C. 返回最终推理摘要
-    A-->>U: D. 即时呈现对话结果 (约 5-15s)
+    Note over Q, W: 若处理连续失败 3 次，消息进入 DLQ 死信队列
 ```
 
 #### 3. 跨实体系统综合拓扑图 (直连线与数据流向)
@@ -191,11 +178,11 @@ graph TD
     Lambda_API == "C. 即时回复" ==> UI
 ```
 
-### 5. 核心架构：异步轮询 (Asynchronous Polling)
-为了解决 AWS API Gateway 29 秒超时限制，系统已全面升级为异步任务流架构：
-- **API 接收层**：FastAPI 负责接收上传、在 DynamoDB 记录任务并秒回响应。
-- **事件触发层**：S3 的 `ObjectCreated` 事件自动触发后台 Worker。
-- **后台处理层**：专用 Lambda 执行文档解析、向量化并更新任务状态。
+### 5. 核心架构：异步轮询与 SQS 消息队列 (Load Leveling)
+为了解决高并发下的系统稳定性，并提供完善的错误重试机制，系统已升级为 **S3 + SQS** 的组合拳架构：
+- **API 接收层**：FastAPI 接收上传，存入 S3 后向 **SQS (TasksQueue)** 发送一条任务消息，随后秒回响应。
+- **消息缓冲层**：SQS 接收并持久化任务。它充当“蓄水池”，在瞬时高并发时防止 Lambda 过载。
+- **后台处理层**：专用 Lambda 定向从 SQS 获取消息执行 RAG 解析，支持自动指数级退避重试。
 - **前端对账层**：React 通过轮询 `GET /api/tasks/{id}` 获取实时进度并刷新 UI。
 
 详细设计请参见：[🏗️ 异步 RAG 架构深度解析](./aws_asynchronous_rag_architecture.md)

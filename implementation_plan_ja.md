@@ -5,63 +5,53 @@
 目的: NotebookLM に似た個人用ナレッジベース Q&A ツール (RAG システム) を開発する。
 コア戦略: **インフラストラクチャ (ストレージ、コンピューティング、フロントエンド) は、すべてワンストップで AWS ネイティブサービスを直接採用する。** しかし、コストに最も敏感な「モデル推論」と「ベクトルデータベース」の 2 つの領域では、コード内に双方向アダプター (Toggle) を内蔵し、設定パラメータを通じて無料版と高価な純粋 AWS 版をシームレスに切り替え可能にする。
 
-#### 1. 静的インフラストラクチャー展開図 (依存関係)
+#### 1. 静的インフラストラクチャ構成図 (依存関係)
 
 ```mermaid
 graph TD
-    Client["フロントエンド UI (Amplify)"] <--> APIGW["API Gateway"]
-    APIGW <--> Lambda_API["API Lambda (レシーバー)"]
+    Client["フロントエンド (React)"] <--> APIGW["API Gateway"]
+    APIGW <--> Lambda_API["API Lambda (受付)"]
     
-    Lambda_API --> S3[("AWS S3 (原本保存)")]
-    Lambda_API --> DB_Tasks[("DynamoDB (タスク追跡)")]
+    Lambda_API -- "1. ファイル保存" --> S3[("AWS S3 (原本)")]
+    Lambda_API -- "2. タスク送信" --> SQS["AWS SQS (キュー)"]
     
-    S3 -- "ObjectCreated イベント" --> Lambda_Worker["Worker Lambda (非同期処理)"]
+    SQS -- "非同期トリガー" --> Lambda_Worker["Worker Lambda (解析)"]
+    Lambda_Worker -- "リトライ失敗" --> DLQ["AWS SQS (死信キュー DLQ)"]
     
-    subgraph RAG コアエンジン
-        Lambda_Worker -- "ベクトル化" --> MSE["ModelScope (Qwen3-Embedding-8B)"]
-        Lambda_Worker -- "インデックス登録" --> PC["Pinecone (4096次元)"]
-        
-        Lambda_API -- "同期検索" --> PC
-        Lambda_API -- "同期推論" --> MSL["ModelScope (122B LLM)"]
+    subgraph RAG コア
+        Lambda_Worker -- "埋め込み" --> MSE["ModelScope (Qwen3-Embed)"]
+        Lambda_Worker -- "インデックス書込" --> PC["Pinecone (Vector DB)"]
     end
 ```
 
-#### 2. コア基盤とデータフロー (RAG デュアルワークフロー)
-
-以下のシーケンス図は、**非同期インデックス作成**（ポーリング方式）と**同期 Q&A リクエスト**の 2 つの並行プロセスを示しています。
+#### 2. システムデータフロー図 (SQS ロードレベリング)
 
 ```mermaid
 sequenceDiagram
-    participant U as ユーザー (React/Amplify)
+    participant U as ユーザー (React)
     participant A as API Lambda
     participant S as AWS S3
-    participant D as DynamoDB (Tasks)
+    participant Q as SQS (Queue)
     participant W as Worker Lambda
-    participant R as RAG Engine (Shared)
+    participant D as DynamoDB (Tasks)
 
-    Note over U, R: --- 1. 非同期インデックス作成 (Async Ingestion) ---
-    U->>A: 1. アップロード (POST /api/upload)
-    A->>D: 2. タスク登録: {task_id, status: 'PENDING'}
-    A->>S: 3. ファイル保存
-    A-->>U: 4. task_id を即時返却 (秒速レスポンス)
+    Note over U, W: --- フロー 1：非同期ドキュメント解析 (Ingestion) ---
+    U->>A: 1. アップロード (POST /upload)
+    A->>S: 2. ファイルをアーカイブ
+    A->>D: 3. タスク初期化 (PENDING)
+    A->>Q: 4. タスクメッセージ送信
+    A-->>U: 5. 即座に task_id を返却
     
-    S->>W: 5. S3:ObjectCreated イベント発火
-    W->>D: 6. ステータス更新: PROCESSING
-    W->>R: 7. ベクトル化 & Pinecone 登録
-    W->>D: 8. ステータス更新: COMPLETED
-    
-    loop フロントエンドでのポーリング
-        U->>A: GET /api/tasks/{task_id}
-        A->>D: 進捗照会
-        A-->>U: 現在のステータスを返却
-    end
-
+    Q->>W: 6. 自動起動 (トリガー)
+    W->>D: 7. ステータス更新: PROCESSING
+    W->>W: 8. RAG ベクトル化処理実行
+    W->>D: 9. ステータス更新: COMPLETED
+```
     Note over U, R: --- 2. 同期の対話・検索 (Sync Q&A) ---
     U->>A: A. 質問を送信 (POST /api/chat)
     A->>R: B. RAG チェーンの実行 (検索 -> 生成)
     R-->>A: C. 回答のサマリーを返却
     A-->>U: D. 即座に回答を表示 (約 5-15秒)
-```
 
 ### コアコンポーネントの説明
 1. **フロントエンド (Amplify + React/Vite)**: ドキュメントのアップロードとチャットインターフェイスのためのUIを提供。
@@ -88,19 +78,19 @@ sequenceDiagram
 
 このプロジェクトをスムーズに稼働させるには、以下 3 つの主要な基盤アクセス認証と環境準備が必要です：
 
-1. **自動デプロイメント用 AWS IAM 資格情報の取得**
-   - AWS IAM コンソールにアクセスし、プログラムアクセス用のユーザー（例: `notebooklm-dev-user`）を作成します。
-   - `AdministratorAccess` を付与します（API Gateway のシームレスな作成や CloudFormation トリガーを保証するため）。
-   - 発行される **`AWS_ACCESS_KEY_ID`** と **`AWS_SECRET_ACCESS_KEY`**、そして `AWS_REGION` を安全に保管します。
-   
-2. **ModelScope プラットフォームの API アクセス認証**
-   - Aliyun または ModelScope コミュニティのアカウントを登録・ログインします。
-   - コンソールで長期有効な **`MODELSCOPE_API_KEY`** を生成し、オープンソースモデルを無制限に利用可能にします。
-   
-3. **Pinecone ベクトルデータベースの初期インデックス作成**
-   - 無料の Pinecone SaaS アカウントを登録します。
-   - 管理画面で新しいインデックスを作成します。**要件**: Qwen3-Embedding-8B の仕様に厳密に合わせるため、**Dimension (次元数) を `4096` に指定**し、Metric に `cosine` を選択します。
-   - API Keys メニューから **`PINECONE_API_KEY`**、および作成したインデックス名 **`PINECONE_INDEX`** を取得します。
+1.  **自動デプロイメント用 AWS IAM 資格情報の取得**
+    *   AWS IAM コンソールにアクセスし、プログラムアクセス用のユーザー（例: `notebooklm-dev-user`）を作成します。
+    *   `AdministratorAccess` を付与します（API Gateway のシームレスな作成や CloudFormation トリガーを保証するため）。
+    *   発行される **`AWS_ACCESS_KEY_ID`** と **`AWS_SECRET_ACCESS_KEY`**、そして `AWS_REGION` を安全に保管します。
+    
+2.  **ModelScope プラットフォームの API アクセス認証**
+    *   Aliyun または ModelScope コミュニティのアカウントを登録・ログインします。
+    *   コンソールで長期有効な **`MODELSCOPE_API_KEY`** を生成し、オープンソースモデルを無制限に利用可能にします。
+    
+3.  **Pinecone ベクトルデータベースの初期インデックス作成**
+    *   無料の Pinecone SaaS アカウントを登録します。
+    *   管理画面で新しいインデックスを作成します。**要件**: Qwen3-Embedding-8B の仕様に厳密に合わせるため、**Dimension (次元数) を `4096` に指定**し、Metric に `cosine` を選択します。
+    *   API Keys メニューから **`PINECONE_API_KEY`**、および作成したインデックス名 **`PINECONE_INDEX`** を取得します。
 
 これらの環境変数/シークレット値は、GitHub の **Settings -> Secrets and variables -> Actions** にすべて設定することで、完全に自動化された CI/CD パイプラインが機能し始めます。
 
@@ -185,14 +175,14 @@ graph TD
 ```
 
 **アーキテクチャ進化によるメリット**:
-1. **究極の UX**: 方案1 では、Function URL を活用して API Gateway を回避し、ChatGPT のような文字単位でのリアルタイムストリーミング出力 (SSE) を RAG システムに提供します。
-2. **堅牢性とスケーラビリティ**: 方案2 では、時間がかかるタスクを SQS によってトラフィックシェーピングし、API Gateway のタイムアウトエラーに悩まされることなく、フロントエンドに進行状況バーを表示できるようになります。
+1.  **究極の UX**: 方案1 では、Function URL を活用して API Gateway を回避し、ChatGPT のような文字単位でのリアルタイムストリーミング出力 (SSE) を RAG システムに提供します。
+2.  **堅牢性とスケーラビリティ**: 方案2 では、時間がかかるタスクを SQS によってトラフィックシェーピングし、API Gateway のタイムアウトエラーに悩まされることなく、フロントエンドに進行状況バーを表示できるようになります。
 
 ### 7.3 マルチターン対話コンテキストの強化 (Conversational Memory & Query Rewriting)
 現在のシステムは単一ターン（Single-turn）の Q&A です。AI が「彼」や「翌日」などの代名詞を含むフォローアップの質問を正確に理解できるようにするため、`/api/chat` の RAG 検索チェーンを再構築します：
-1. **記憶の永続化**: グローバルな `SessionID` を導入し、予約済みの Amazon DynamoDB を利用して過去の N ターンの対話履歴を保存します。
-2. **クエリの書き換え (Query Rewriting)**: Pinecone のベクトル検索を実行する前に、最初の超高速な LLM 前処理フェーズを追加します。履歴コンテキストを利用して「不完全なフォローアップ質問」を「独立した完全な質問」に補完し（代名詞の解消）、正確なナレッジチャンクにヒットすることを保証します。
-3. **最終 Prompt 合成**: 質問応答コアチェーンを送信する際、補完された独立したクエリ、ヒットしたベクトルスライス、および直近の `Chat History` をまとめて主力推論モデルに送信します。
+1.  **記憶の永続化**: グローバルな `SessionID` を導入し、予約済みの Amazon DynamoDB を利用して過去の N ターンの対話履歴を保存します。
+2.  **クエリの書き換え (Query Rewriting)**: Pinecone のベクトル検索を実行する前に、最初の超高速な LLM 前処理フェーズを追加します。履歴コンテキストを利用して「不完全なフォローアップ質問」を「独立した完全な質問」に補完し（代名詞の解消）、正確なナレッジチャンクにヒットすることを保証します。
+3.  **最終 Prompt 合成**: 質問応答コアチェーンを送信する際、補完された独立したクエリ、ヒットしたベクトルスライス、および直近の `Chat History` をまとめて主力推論モデルに送信します。
 
 ## 9. AWS Bedrock 全管理型ナレッジベース (Managed RAG) 
 「マネージドサービスを練習したいが、コストも抑制したい」というニーズに基づき、アーキテクチャに「制御型ラボモード」を導入します。
@@ -234,12 +224,12 @@ GitHub Secrets/Variables で以下の設定が必要です：
 - `KNOWLEDGE_BASE_ID`: Bedrock ナレッジベース ID
 - `DATA_SOURCE_ID`: S3 データソース ID
 
-### 5. コアアーキテクチャ：非同期ポーリング (Asynchronous Polling)
-API Gateway の 29 秒タイムアウト制限を回避するため、システムを非同期タスクフローへとアップグレードしました：
-- **API 受信層**: FastAPI がアップロードを受付け、DynamoDB にタスクを記録して即座にレスポンスを返します。
-- **イベント駆動層**: S3 の `ObjectCreated` イベントがバックグラウンドの Worker を自動起動します。
-- **バックグラウンド処理層**: 専用の Lambda がドキュメントの解析、ベクトル化を実行し、ステータスを更新します。
-- **フロントエンド同期層**: React が `GET /api/tasks/{id}` をポーリングし、進捗をリアルタイムに表示します。
+### 5. コアアーキテクチャ：非同期ポーリングと SQS ロードレベリング
+高負荷時の安定性を確保し、再試行メカニズムを強化するため、システムは **S3 + SQS** のハイブリッド構成にアップグレードされました：
+- **API 受信層**：FastAPI がファイルを受け取り、S3 に保存後、**SQS (TasksQueue)** へメッセージを送信し、即座に応答を返します。
+- **メッセージ緩衝層**：SQS がタスクを永続化し、「バッファ」として機能することで、突発的な大量アップロードによる Lambda の過負荷を防ぎます。
+- **バックエンド処理層**：専用の Lambda が SQS からメッセージを 1 つずつ取得し、RAG 解析を実行します。異常時には自動で指数バックオフによる再試行が行われます。
+- **フロントエンド同期層**：React が `GET /api/tasks/{id}` を定期的にポーリングし、進捗を UI に反映します。
 
 詳細な設計図についてはこちらを参照：[🏗️ 非同期 RAG アーキテクチャの全容解析](./aws_asynchronous_rag_architecture.md)
 
