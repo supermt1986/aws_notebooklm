@@ -163,16 +163,16 @@ graph TD
         LambdaURL --> LLM_Fast["ストリーム対応 LLM (7B/8B)"]
     end
     
-    subgraph Scheme2 ["方案2：非同期キューポーリング (シナリオ：長文レポートの生成)"]
-        Client -- "A. レポート生成ジョブを投入" --> APIGW["API Gateway (29秒タイムアウト)"]
-        APIGW -- "B. システムが瞬時に Task_ID を返す" --> Client
-        APIGW --> Lambda_API["FastAPI 受信サーバー"]
-        Lambda_API -- "C. 重いジョブをキューに投げる" --> SQS["AWS SQS メッセージキュー (非同期バッファ)"]
-        SQS -- "D. バックグラウンドで順次消費" --> Lambda_Worker["裏方 Lambda ワーカー"]
-        Lambda_Worker --> LLM_Heavy["超巨大パラメータモデル (122B)"]
-        Lambda_Worker -- "E. 生成完了後、結果を保存" --> DynamoDB[("Amazon DynamoDB (結果テーブル)")]
-        Client -. "F. Task_ID を用いてポーリング" .-> APIGW
-        APIGW -. "G. DynamoDB から状況・結果を照会" .-> DynamoDB
+    subgraph Scheme_Current ["現在のアーキテクチャ：非同期ポーリング"]
+        Client -- "A. アップロードタスクを送信" --> APIGW["API Gateway (即時レスポンス)"]
+        APIGW -- "B. TaskID を即座に返却" --> Client
+        APIGW --> Lambda_API["タスクレシーバー (Lambda)"]
+        Lambda_API -- "C. ファイルを S3 へ物理保存" --> S3["AWS S3 (ストレージ)"]
+        S3 -- "D. イベントトリガー" --> Lambda_Worker["バックグラウンド実行機 (Lambda)"]
+        Lambda_Worker --> LLM_Engine["RAG エンジン (Shared)"]
+        Lambda_Worker -- "E. 進捗ステータスを更新" --> DynamoDB[("Amazon DynamoDB (タスク管理表)")]
+        Client -. "F. フロントが TaskID でポーリング" .-> APIGW
+        APIGW -. "G. DynamoDB から進捗を取得" .-> DynamoDB
     end
 ```
 
@@ -206,22 +206,6 @@ graph TD
 - `MANUAL` (デフォルト): カスタム Lambda チャンカー + ModelScope 埋め込み。
 - `BEDROCK_KB`: `AmazonKnowledgeBasesRetriever` を介して AWS ネイティブの検索インターフェースを呼び出し。
 
-## 11. 异步轮询アーキテクチャ (方案 B: 最終的な推移)
-
-一部の AWS 環境において Lambda Function URL への公網アクセスが制限（403 Forbidden）されていることを受け、より堅牢な **SQS/S3 Trigger + DynamoDB** による非同期処理モデルを正式に採用し、29 秒のタイムアウト制限を構造的に回避します。
-
-### 11.1 非同期処理フロー (Flow)
-1.  **ユーザーアップロード**: `POST /api/upload` は S3 へのファイル書き込みのみを担当。
-2.  **タスク登録**: バックエンドは `TasksTable` に `status=PENDING` のレコードを登録し、即座に `task_id` を返却（ここでのレスポンスは 1-2 秒）。
-3.  **バックグラウンド起動**: S3 の `ObjectCreated` 事件が新しい **Worker Lambda** を自動起動。
-4.  **重い処理の実行**: Worker Lambda がバックグラウンドで切片化、埋め込み（ModelScope）、またはナレッジベース同期を実行。完了後、`TasksTable` のステータスを `COMPLETED` に更新。
-5.  **フロントエンドのポーリング**: フロントエンド（React）は `GET /api/tasks/{task_id}` を使用して 3-5 秒おきに状態を確認。
-
-### 11.2 主要なコンポーネントの変更
-*   **DynamoDB**: 非同期進捗を追跡するための `TasksTable` を新設。
-*   **Lambda**: S3 イベントソースをトリガーとする `s3_processor` 函数を追加。
-*   **Frontend**: `App.tsx` にポーリング Hook を実装。
-
 ## 10. Ingestion の自動化とパフォーマンス最適化 (最新の進捗)
 
 開発・運用体験を向上させるため、RAG ワークフローに自動化フックとタイムアウト防止ロジックを導入しました。
@@ -242,7 +226,19 @@ GitHub Secrets/Variables で以下の設定が必要です：
 - `KNOWLEDGE_BASE_ID`: Bedrock ナレッジベース ID
 - `DATA_SOURCE_ID`: S3 データソース ID
 
-## 8. 技術的な課題と解決策のまとめ (Serverless RAG 実務経験)
+### 5. コアアーキテクチャ：非同期ポーリング (Asynchronous Polling)
+API Gateway の 29 秒タイムアウト制限を回避するため、システムを非同期タスクフローへとアップグレードしました：
+- **API 受信層**: FastAPI がアップロードを受付け、DynamoDB にタスクを記録して即座にレスポンスを返します。
+- **イベント駆動層**: S3 の `ObjectCreated` イベントがバックグラウンドの Worker を自動起動します。
+- **バックグラウンド処理層**: 専用の Lambda がドキュメントの解析、ベクトル化を実行し、ステータスを更新します。
+- **フロントエンド同期層**: React が `GET /api/tasks/{id}` をポーリングし、進捗をリアルタイムに表示します。
+
+詳細な設計図についてはこちらを参照：[🏗️ 非同期 RAG アーキテクチャの全容解析](./aws_asynchronous_rag_architecture.md)
+
+---
+
+### 今日の開発記録：トラブルと解決策 🐛
+のまとめ (Serverless RAG 実務経験)
 
 プロジェクト初期の開発において、AWS Lambda アーキテクチャに特有の以下の技術的課題に遭遇し、解決しました：
 
