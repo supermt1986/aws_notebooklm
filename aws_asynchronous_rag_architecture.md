@@ -16,29 +16,25 @@ graph TD
 
     %% 1. 异步上传流水线 (Async Ingestion)
     Client -- "1. 上传文件 (POST /upload)" --> APIGW
-    APIGW --> Lambda_API
-    Lambda_API -- "2. 记录 PENDING 状态" --> DB_Tasks
-    Lambda_API -- "3. 物理上传文件" --> S3
+    APIGW -- "2. 转发请求" --> Lambda_API
+    Lambda_API -- "3. 记录任务 (DynamoDB)" --> DB_Tasks
+    Lambda_API -- "4. 保存原始文件 (S3)" --> S3
     
-    S3 -- "4. 触发事件" --> S3_Event
-    S3_Event --> Lambda_Worker
+    S3 -- "5. 触发事件" --> S3_Event
+    S3_Event -- "6. 激活后台 Worker" --> Lambda_Worker
     
-    Lambda_Worker -- "5. 状态变更为 PROCESSING" --> DB_Tasks
-    Lambda_Worker --> RagEngine
-    RagEngine -- "6. 执行切片 & 向量化" --> ModelScope
-    RagEngine -- "7. 写入向量索引" --> Pinecone
-    Lambda_Worker -- "8. 状态变更为 COMPLETED" --> DB_Tasks
+    Lambda_Worker -- "7. 向量化处理" --> RagEngine
+    RagEngine -- "8. 写入向量索引" --> Pinecone
+    Lambda_Worker -- "9. 更新任务状态" --> DB_Tasks
 
-    Client -. "9. 定时轮询 (status)" .-> APIGW
-    APIGW -.-> Lambda_API
-    Lambda_API -. "10. 获取进度" .-> DB_Tasks
+    Client -. "10. 进度轮询 (Polling)" .-> APIGW
 
     %% 2. 同步对话流水线 (Sync QA)
-    Client == "A. 自然语言提问 (POST /chat)" ==> APIGW
-    APIGW == "B. 实时请求" ==> Lambda_API
-    Lambda_API == "C. 检索 & 生成" ==> RagEngine
-    RagEngine == "D. 答案摘要" ==> Lambda_API
-    Lambda_API == "E. 即时回复" ==> Client
+    Client -- "A. 同步提问 (POST /chat)" --> APIGW
+    APIGW -- "B. 实时请求转发" --> Lambda_API
+    Lambda_API -- "C. 检索召回 & 背景生成" --> RagEngine
+    RagEngine -- "D. AI 回答内容" --> Lambda_API
+    Lambda_API -- "E. 即时回复响应" --> Client
 ```
 
 ## 2. 详细时序图 (Sequence Diagram)
