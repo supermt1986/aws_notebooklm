@@ -46,4 +46,6 @@ jobs:
           PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
           PINECONE_INDEX: ${{ secrets.PINECONE_INDEX }}
           AWS_S3_BUCKET_NAME: ${{ secrets.AWS_S3_BUCKET_NAME }}
+          RETRIEVER_MODE: ${{ vars.RETRIEVER_MODE || secrets.RETRIEVER_MODE }}
+          KNOWLEDGE_BASE_ID: ${{ vars.KNOWLEDGE_BASE_ID || secrets.KNOWLEDGE_BASE_ID }}
         run: serverless deploy --stage dev
