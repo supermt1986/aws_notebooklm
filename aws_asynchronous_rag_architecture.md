@@ -34,7 +34,7 @@ graph TD
     Lambda_API -. "10. 获取进度" .-> DB_Tasks
 
     %% 2. 同步对话流水线 (Sync QA)
-    Client ==>| "A. 自然语言提问 (POST /chat)" | APIGW
+    Client == "A. 自然语言提问 (POST /chat)" ==> APIGW
     APIGW ==>| "B. 实时请求" | Lambda_API
     Lambda_API ==>| "C. 检索 & 生成" | RagEngine
     RagEngine ==>| "D. 答案摘要" | Lambda_API
