@@ -20,6 +20,7 @@ async def process_into_vectorstore(file_path: str, filename: str):
             loader = TextLoader(file_path, autodetect_encoding=True)
             
         docs = loader.load()
+        print(f"[RAG引擎] 成功从 {filename} 中读取了 {len(docs)} 页原始数据")
         
         # 统一 metadata 标志位
         for doc in docs:
@@ -27,7 +28,12 @@ async def process_into_vectorstore(file_path: str, filename: str):
             
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         splits = text_splitter.split_documents(docs)
+        print(f"[RAG引擎] 文档切片完成，共计 {len(splits)} 个片段")
         
+        if not splits:
+            print("[RAG引擎] 警告：切片结果为空！请检查文件是否为扫描件或内容是否无法提取")
+            return 0
+
         provider = os.getenv("VECTOR_DB_PROVIDER", "pinecone")
         if provider == "pinecone":
             from pinecone import Pinecone
@@ -45,12 +51,18 @@ async def process_into_vectorstore(file_path: str, filename: str):
                     m["text"] = t
                 ids = [str(uuid.uuid4()) for _ in batch]
                 vecs = embeddings.embed_documents(texts)
+                
+                # 记录维度诊断信息
+                if i == 0:
+                    print(f"[RAG引擎] 向量维度探测: {len(vecs[0])} 维")
+                    
                 index.upsert(vectors=list(zip(ids, vecs, metas)))
+                print(f"[RAG引擎] 已成功推送批次 {i//batch_size + 1} 至 Pinecone")
         else:
             vector_store = get_vector_store()
             vector_store.add_documents(splits)
             
-        print(f"[RAG引擎] {filename} 处理完毕！")
+        print(f"[RAG引擎] {filename} 处理完毕，共入库 {len(splits)} 条向量。")
         return len(splits)
     except Exception as e:
         import traceback
