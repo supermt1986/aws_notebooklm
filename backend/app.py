@@ -200,6 +200,8 @@ async def chat_interaction(req: ChatRequest):
     """
     from adapters import get_llm, get_retriever
     from langchain_core.prompts import ChatPromptTemplate
+    from langchain_core.runnables import RunnablePassthrough
+    from langchain_core.output_parsers import StrOutputParser
     
     # 动态获取当前选定的模型和检索器（支持代码手动挡与 KB 托管挡切换）
     llm = get_llm()
