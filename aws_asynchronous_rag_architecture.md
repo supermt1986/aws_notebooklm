@@ -14,20 +14,22 @@ graph TD
         RagEngine["RAG 核心逻辑 (Shared)"]
     end
 
-    %% 1. 异步上传流水线 (Async Ingestion)
+    %% 1. 异步上传流水线 (Async Ingestion - 同步部分)
     Client -- "1. 上传文件 (POST /upload)" --> APIGW
     APIGW -- "2. 转发请求" --> Lambda_API
     Lambda_API -- "3. 记录任务 (DynamoDB)" --> DB_Tasks
-    Lambda_API -- "4. 保存原始文件 (S3)" --> S3
+    Lambda_API -- "4. 存档原始文件 (S3)" --> S3
+    Lambda_API -- "5. 立即返回成功 & task_id" --> Client
     
-    S3 -- "5. 触发事件" --> S3_Event
-    S3_Event -- "6. 激活后台 Worker" --> Lambda_Worker
+    %% 异步处理部分 (Async Ingestion - 后台爆发)
+    S3 -- "6. 触发 ObjectCreated 事件" --> S3_Event
+    S3_Event -- "7. 激活后台 Worker" --> Lambda_Worker
     
-    Lambda_Worker -- "7. 向量化处理" --> RagEngine
-    RagEngine -- "8. 写入向量索引" --> Pinecone
-    Lambda_Worker -- "9. 更新任务状态" --> DB_Tasks
+    Lambda_Worker -- "8. 核心 RAG 向量化解析" --> RagEngine
+    RagEngine -- "9. 写入向量索引" --> Pinecone
+    Lambda_Worker -- "10. 将状态改写为 COMPLETED" --> DB_Tasks
 
-    Client -. "10. 进度轮询 (Polling)" .-> APIGW
+    Client -. "11. 定期轮询状态 (Polling)" .-> APIGW
 
     %% 2. 同步对话流水线 (Sync QA)
     Client -- "A. 同步提问 (POST /chat)" --> APIGW
