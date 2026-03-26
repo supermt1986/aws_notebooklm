@@ -290,3 +290,4 @@ async def chat_interaction(req: ChatRequest):
 
 # Mangum: 包装 FastAPI 应用，使其可以直接作为 AWS Lambda 函数运行，接管 API Gateway 的 HTTP Proxy 事件
 handler = Mangum(app)
+# Final deployment trigger
