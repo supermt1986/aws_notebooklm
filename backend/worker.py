@@ -33,9 +33,15 @@ def handler(event, context):
             # 2. 更新状态为 PROCESSING
             update_task_status(task_id, "PROCESSING", "正在从队列提取并执行向量化...")
             
-            # 3. 下载文件至 /tmp 目录
-            temp_path = f"/tmp/{original_filename}"
-            s3_client.download_file(bucket, key, temp_path)
+            # 3. 根据任务类型确定源文件路径
+            if bucket != "N/A":
+                print(f"[Worker] 检测到文件任务，正在从 S3 下载: {key}")
+                temp_path = f"/tmp/{original_filename}"
+                s3_client.download_file(bucket, key, temp_path)
+                source_path = temp_path
+            else:
+                print(f"[Worker] 检测到 URL 任务，直接解析地址: {key}")
+                source_path = key # 对于 URL，直接使用原始地址
             
             # 4. 执行核心 RAG 索引逻辑
             retriever_mode = os.getenv("RETRIEVER_MODE", "MANUAL")
@@ -46,8 +52,8 @@ def handler(event, context):
             else:
                 print("[Worker] 执行 MANUAL 模式本地嵌入...")
                 # 在 SQS 触发的同步 Handler 中运行异步逻辑
-                asyncio.run(process_into_vectorstore(temp_path, original_filename))
-                update_task_status(task_id, "COMPLETED", "文档解析与消息队列处理圆满完成。")
+                asyncio.run(process_into_vectorstore(source_path, original_filename))
+                update_task_status(task_id, "COMPLETED", f"数据源 {original_filename} 解析与向量化处理圆满完成。")
                 
             print(f"[Worker] 任务 {task_id} 处理成功。")
             

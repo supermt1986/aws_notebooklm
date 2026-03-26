@@ -13,3 +13,6 @@ python-dotenv
 pypdf
 tiktoken
 python-multipart
+docx2txt
+openpyxl
+beautifulsoup4

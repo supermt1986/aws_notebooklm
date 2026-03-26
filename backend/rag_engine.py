@@ -14,9 +14,24 @@ async def process_into_vectorstore(file_path: str, filename: str):
     from langchain_text_splitters import RecursiveCharacterTextSplitter
     print(f"[RAG引擎] 开始对文件进行分块处理: {filename}")
     try:
-        if file_path.lower().endswith(".pdf"):
+        # 根据后缀或格式选择加载器
+        if file_path.lower().startswith("http"):
+            from langchain_community.document_loaders import WebBaseLoader
+            loader = WebBaseLoader(file_path)
+            filename = file_path # 对于 URL，我们将 URL 本身作为文件名标识
+        elif file_path.lower().endswith(".pdf"):
+            from langchain_community.document_loaders import PyPDFLoader
             loader = PyPDFLoader(file_path)
+        elif file_path.lower().endswith(".docx"):
+            from langchain_community.document_loaders import Docx2txtLoader
+            loader = Docx2txtLoader(file_path)
+        elif file_path.lower().endswith(".xlsx") or file_path.lower().endswith(".xls"):
+            from langchain_community.document_loaders import UnstructuredExcelLoader
+            # 注意：UnstructuredExcelLoader 需要 openpyxl
+            loader = UnstructuredExcelLoader(file_path, mode="elements")
         else:
+            # 默认为文本加载器 (支持 .txt, .md, .csv 等)
+            from langchain_community.document_loaders import TextLoader
             loader = TextLoader(file_path, autodetect_encoding=True)
             
         docs = loader.load()

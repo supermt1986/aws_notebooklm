@@ -181,7 +181,7 @@ function App() {
                 {t('upload_btn')}
                 <input
                   type="file"
-                  accept=".pdf,image/*,.txt,.md,.csv,.docx"
+                  accept=".pdf,image/*,.txt,.md,.csv,.docx,.xlsx"
                   hidden
                   onClick={(e) => (e.currentTarget.value = '')}
                   onChange={handleFileUpload}

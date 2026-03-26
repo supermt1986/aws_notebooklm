@@ -97,6 +97,51 @@ async def delete_document(filename: str):
         from fastapi import HTTPException
         raise HTTPException(status_code=500, detail=str(e))
 
+class IngestUrlRequest(BaseModel):
+    url: str
+
+@app.post("/api/ingest-url")
+async def ingest_url(req: IngestUrlRequest):
+    """
+    URL 抓取入口：接收 URL 并将其存入 SQS 队列进行异步解析
+    """
+    task_id = str(uuid.uuid4())
+    
+    try:
+        # 1. 在 DynamoDB 中注册“爬虫”任务
+        table = dynamodb.Table(os.getenv("TASKS_TABLE"))
+        table.put_item(
+            Item={
+                "task_id": task_id,
+                "status": "PENDING",
+                "filename": req.url,
+                "type": "URL",
+                "createdAt": int(time.time()),
+                "updatedAt": int(time.time())
+            }
+        )
+        
+        # 2. 推送至 SQS 队列
+        sqs = boto3.client("sqs")
+        queue_url = os.getenv("TASKS_QUEUE_URL")
+        
+        message_body = {
+            "task_id": task_id,
+            "bucket": "N/A", # URL 任务不需要 bucket
+            "key": req.url,   # 将 URL 作为 key 传递给 worker
+            "filename": req.url
+        }
+        
+        sqs.send_message(
+            QueueUrl=queue_url,
+            MessageBody=json.dumps(message_body)
+        )
+        
+        return {"task_id": task_id, "message": "URL 任务已提交"}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/tasks/{task_id}")
 async def get_task_status(task_id: str):
     """
