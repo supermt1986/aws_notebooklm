@@ -16,7 +16,9 @@ def get_llm():
         return ChatOpenAI(
             api_key=os.getenv("MODELSCOPE_API_KEY", "your-modelscope-key"),
             base_url="https://api-inference.modelscope.cn/v1/",
-            model="Qwen/Qwen3-VL-8B-Instruct"
+            model="Qwen/Qwen3-VL-8B-Instruct",
+            timeout=300, # 配合后端异步 Lambda 的 300s 限制
+            max_retries=3
         )
     elif provider == "bedrock":
         # 如果使用纯粹 AWS 轨道，利用 IAM 角色默认的环境变量 (如在 Lambda 内) 获取凭证
@@ -38,7 +40,9 @@ def get_embeddings():
         return OpenAIEmbeddings(
             api_key=os.getenv("MODELSCOPE_API_KEY", "your-modelscope-key"),
             base_url="https://api-inference.modelscope.cn/v1/",
-            model="Qwen/Qwen3-Embedding-0.6B" # 由用户建议的专职 1024维 对比学习召回模型
+            model="Qwen/Qwen3-Embedding-0.6B",
+            timeout=300, # 针对长文档切片后的批量 Embedding 请求给予充足时间
+            max_retries=3
         )
     elif provider == "bedrock":
         return BedrockEmbeddings(
