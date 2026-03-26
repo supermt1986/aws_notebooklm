@@ -5,7 +5,11 @@ except ImportError:
 
 # AWS NotebookLM Backend API - Triggering fresh deploy for SQS upgrade
 import os
-from fastapi import FastAPI, UploadFile, File, Form
+import uuid
+import time
+import json
+import boto3
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
 from pydantic import BaseModel
@@ -20,6 +24,9 @@ os.environ["TIKTOKEN_CACHE_DIR"] = "/tmp/tiktoken_cache"
 os.environ["XDG_CACHE_HOME"] = "/tmp/xdg_cache"
 
 load_dotenv()
+
+# 初始化 AWS 客户端资源
+dynamodb = boto3.resource("dynamodb")
 
 app = FastAPI(title="AWS NotebookLM API")
 
@@ -93,8 +100,7 @@ async def delete_document(filename: str):
 
         return {"status": "success", "message": f"全链路粉碎完毕: {filename}"}
     except Exception as e:
-        print(f"[删除失败异常] {e}")
-        from fastapi import HTTPException
+        # Removed redundant from fastapi import HTTPException
         raise HTTPException(status_code=500, detail=str(e))
 
 class IngestUrlRequest(BaseModel):
